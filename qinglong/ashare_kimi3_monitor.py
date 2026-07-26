@@ -246,7 +246,7 @@ def load_state(path: Path) -> dict[str, Any]:
         data.setdefault("seen_trades", [])
         data.setdefault("meta", {})
         return data
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"读取状态失败，将重建: {exc}")
         return default
 
@@ -288,7 +288,7 @@ def fetch_snapshot(url: str, *, retries: int = 3) -> dict[str, Any]:
             if not isinstance(data.get("trades"), list):
                 data["trades"] = []
             return data
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             last_err = exc
             if attempt >= retries:
                 break
@@ -474,7 +474,7 @@ def poll_once(config: dict[str, Any], state: dict[str, Any], *, bootstrap: bool)
     ]
     matched.sort(key=trade_sort_key)
 
-    seen = set(str(x) for x in (state.get("seen_trades") or []))
+    seen = {str(x) for x in (state.get("seen_trades") or [])}
 
     # 数据里的交易日；没有则用北京时间今天
     session_date = str(data.get("date") or now_cn().strftime("%Y-%m-%d"))
@@ -602,7 +602,7 @@ def run_monitor() -> None:
                 state = poll_once(config, state, bootstrap=bootstrap)
                 bootstrap = False
                 save_state(state_path, state)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 print(f"本轮失败: {exc}")
             wait_interruptible(config["interval"])
             continue

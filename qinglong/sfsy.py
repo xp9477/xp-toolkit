@@ -81,7 +81,7 @@ class Sfsy:
             return False
 
     def get_sign(self):
-        timestamp = str(int(round(time.time() * 1000)))
+        timestamp = str(round(time.time() * 1000))
         token = 'wwesldfs29aniversaryvdld29'
         sysCode = 'MCS-MIMP-CORE'
         data = f'token={token}&timestamp={timestamp}&sysCode={sysCode}'
@@ -586,7 +586,7 @@ class Sfsy:
     async def ear_end_2023_get_award(self):
         print(">>> 开始抽取卡片...")
         for index in range(10):
-            for i in range(0, 3):
+            for i in range(3):
                 response = await self.client.post(
                     url="https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberNonactivity~anniversary2025ClaimService~claim",
                     headers=self.headers,
@@ -724,11 +724,7 @@ class Sfsy:
             for task in filter(lambda x: x['status'] == 2, task_list):
                 if self.anniversary_black:
                     return
-                if task['taskType'] in ['PLAY_ACTIVITY_GAME', 'PLAY_HAPPY_ELIMINATION', 'PARTAKE_SUBJECT_GAME']:
-                    pass
-                elif task['taskType'] == 'FOLLOW_SFZHUNONG_VEDIO_ID':
-                    pass
-                elif task['taskType'] in ['BROWSE_VIP_CENTER', 'GUESS_GAME_TIP', 'CREATE_SFID', 'CLICK_MY_SETTING',
+                if task['taskType'] in ['PLAY_ACTIVITY_GAME', 'PLAY_HAPPY_ELIMINATION', 'PARTAKE_SUBJECT_GAME'] or task['taskType'] == 'FOLLOW_SFZHUNONG_VEDIO_ID' or task['taskType'] in ['BROWSE_VIP_CENTER', 'GUESS_GAME_TIP', 'CREATE_SFID', 'CLICK_MY_SETTING',
                                           'CLICK_TEMPLATE', 'REAL_NAME', 'SEND_SUCCESS_RECALL', 'OPEN_SVIP',
                                           'OPEN_FAST_CARD', 'FIRST_CHARGE_NEW_EXPRESS_CARD', 'CHARGE_NEW_EXPRESS_CARD',
                                           'INTEGRAL_EXCHANGE']:
@@ -789,7 +785,7 @@ class Sfsy:
             account_info = data.get("obj", {}).get("account", {})
             unbox_list = [f"[{item['currency']}]X{item['amount']}" for item in
                           account_info.get('receivedAccountList', [])]
-            print(">> 拆盒子📦： %s" % ', '.join(unbox_list) or '空气')
+            print(f">> 拆盒子📦： {', '.join(unbox_list) or '空气'}")
         else:
             error_message = data.get('errorMessage') or json.dumps(response) or '无返回'
             print(f">> 拆盒子失败！❌ - {error_message}")

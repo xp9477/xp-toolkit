@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 解析mitmproxy flows.json，智能查找VIP/会员/用户状态相关接口
 自动读取响应体内容，分析JSON结构中的VIP字段

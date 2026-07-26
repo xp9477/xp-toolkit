@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 生成Loon VIP伪装插件 - 通用版本
 支持自定义字段映射和多种响应结构

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 全面分析 mitm_responses 目录中的所有响应
 展示完整的 JSON 结构和所有字段

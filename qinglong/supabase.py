@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 name: Supabase Keepalive
 cron: 0 */6 * * *

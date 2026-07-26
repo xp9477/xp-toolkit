@@ -331,9 +331,7 @@ def guafen(uid,token):
     shuju = requests.post(url=guafen1, json=data).json()
     #print(shuju)
     print('------')
-    if '14点自动开奖' == shuju['data']['divide_data']['divide'][rqi[0]]['button']['text']:
-        print(f"参加今日瓜分状态：成功-{shuju['data']['divide_data']['divide'][rqi[0]]['button']['text']}")
-    elif '发奖了' == shuju['data']['divide_data']['divide'][rqi[0]]['button']['text']:
+    if '14点自动开奖' == shuju['data']['divide_data']['divide'][rqi[0]]['button']['text'] or '发奖了' == shuju['data']['divide_data']['divide'][rqi[0]]['button']['text']:
         print(f"参加今日瓜分状态：成功-{shuju['data']['divide_data']['divide'][rqi[0]]['button']['text']}")
     else:
         print("参加今日瓜分状态：失败")

@@ -130,7 +130,7 @@ def _send_bark_post(server: str, device_key: str, title: str, content: str) -> t
         if code is not None:
             ok = int(code) == 200
         msg = data.get("message") or text
-    except Exception:  # noqa: BLE001
+    except Exception:
         msg = text or f"HTTP {resp.status_code}"
     return ok, f"POST {resp.status_code} {msg}"
 
@@ -149,7 +149,7 @@ def _send_bark_get(server: str, device_key: str, title: str, content: str) -> tu
         if code is not None:
             ok = int(code) == 200
         msg = data.get("message") or text
-    except Exception:  # noqa: BLE001
+    except Exception:
         msg = text or f"HTTP {resp.status_code}"
     return ok, f"GET {resp.status_code} {msg}"
 
@@ -186,7 +186,7 @@ def send(title: str, content: str) -> bool:
     except requests.RequestException as exc:
         print(f"Bark 推送网络异常: {exc}")
         return False
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Bark 推送异常: {exc}")
         return False
 

@@ -141,10 +141,7 @@ class Script:
         balance = r6.json()['data']['dji_credit_rmb']
         print(f"未兑换积分：{credit.group(1) if credit else '未找到'}")
         print(f"余额：{str(balance) if balance else '未找到'}")
-        if not balance:
-            return False
-        
-        return True
+        return bool(balance)
 
 
 def main() -> int:
