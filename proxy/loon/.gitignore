@@ -1,0 +1,9 @@
+# Temp files
+*.json
+*.txt
+*.cer
+*.pem
+*.p12
+flows.json
+cookies.txt
+mitm_responses/

@@ -1,0 +1,15 @@
+payload:
+# >
+  - DOMAIN-SUFFIX,990226.xyz
+# > PT site
+  - DOMAIN-SUFFIX,hdarea.club
+  - DOMAIN-SUFFIX,hdhome.org
+  - DOMAIN-SUFFIX,hhanclub.top
+  - DOMAIN-SUFFIX,hares.top
+  - DOMAIN-SUFFIX,1ptba.com
+  - DOMAIN-SUFFIX,audiences.me
+  - DOMAIN-SUFFIX,cinefiles.info
+# > Others
+  - DOMAIN-SUFFIX,x6d.com
+  - DOMAIN-SUFFIX,apple.com
+  - DOMAIN-SUFFIX,letsencrypt.org

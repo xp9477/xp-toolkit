@@ -1,0 +1,13 @@
+# > PT Site
+HOST-SUFFIX,m-team.cc,Self-Proxy
+HOST-SUFFIX,torrentleech.org,Self-Proxy
+HOST-SUFFIX,piggo.me,Self-Proxy
+HOST-SUFFIX,dmhy.org,Self-Proxy
+HOST-SUFFIX,fsm.name,Self-Proxy
+HOST-SUFFIX,jpopsuki.eu,Self-Proxy
+# > Others
+HOST,copilot.microsoft.com,Self-Proxy
+HOST-SUFFIX,is.gd,Self-Proxy
+HOST-SUFFIX,cloudflare.com,Self-Proxy
+HOST-SUFFIX,follow.is,Self-Proxy
+HOST-SUFFIX,rsshub.app,Self-Proxy

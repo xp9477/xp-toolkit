@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loon插件生成器"
+  short_description: "通过mitmproxy自动抓包分析，创建Loon插件修改App行为"
+  default_prompt: "帮我创建一个Loon插件来修改App功能"
