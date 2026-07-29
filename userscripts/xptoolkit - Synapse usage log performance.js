@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xptoolkit - Synapse usage log performance
 // @namespace    https://github.com/xp9477/xp-toolkit
-// @version      1.1.0
+// @version      1.1.2
 // @description  Show the gpt-5.6-sol group performance table above common usage logs and suppress system announcements
 // @author       xp9477
 // @match        https://synapse-ai.uk/*
@@ -34,9 +34,10 @@
     failed: '\u8bfb\u53d6\u5931\u8d25',
     retry: '\u53ef\u70b9\u51fb\u201c\u5237\u65b0\u201d\u91cd\u8bd5',
     group: '\u5206\u7ec4',
-    firstTokenLatency: '\u9996 Token \u5ef6\u8fdf',
+    firstTokenLatency: '\u5e73\u5747\u9996 Token \u5ef6\u8fdf',
+    averageLatency: '\u5e73\u5747\u5ef6\u8fdf',
     successRate: '\u6210\u529f\u7387',
-    throughput: '\u541e\u5410\u91cf',
+    throughput: 'TPS',
     uptime: '30 \u5929\u53ef\u7528\u7387'
   };
 
@@ -157,6 +158,14 @@
       #${PANEL_ID} .xpt-table th,#${PANEL_ID} .xpt-table td{border-bottom:1px solid hsl(var(--border,214 32% 91%));text-align:left}
       #${PANEL_ID} .xpt-table th{color:hsl(var(--muted-foreground,215 16% 47%));background:hsl(var(--muted,210 40% 96%));font-weight:600}
       #${PANEL_ID} .xpt-table tbody tr:hover{background:hsl(var(--accent,210 40% 96%))}
+      #${PANEL_ID} .xpt-success{display:flex;align-items:center;gap:8px;min-width:132px}
+      #${PANEL_ID} .xpt-spark{display:flex;align-items:flex-end;gap:1px;height:14px;min-width:95px}
+      #${PANEL_ID} .xpt-spark-slot{display:flex;align-items:flex-end;width:3px;height:14px;color:#f43f5e}
+      #${PANEL_ID} .xpt-spark-slot.xpt-good{color:#10b981}
+      #${PANEL_ID} .xpt-spark-slot.xpt-warn{color:#f59e0b}
+      #${PANEL_ID} .xpt-spark-bar{width:100%;min-height:2px;border-radius:2px;background:currentColor}
+      #${PANEL_ID} .xpt-spark-slot.xpt-latest .xpt-spark-bar{box-shadow:0 0 0 1px hsl(var(--card,0 0% 100%)),0 0 0 2px currentColor}
+      #${PANEL_ID} .xpt-success-value{min-width:42px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-weight:600;text-align:right}
       #${FRAME_ID}{position:fixed!important;left:-20000px!important;top:0!important;width:1600px!important;height:1200px!important;opacity:0!important;pointer-events:none!important;border:0!important;z-index:-2147483648!important}
       @media(max-width:720px){#${PANEL_ID} .xpt-head{align-items:flex-start}#${PANEL_ID} .xpt-body{padding:5px 8px 7px}}
     `;
@@ -245,17 +254,24 @@
   function findPerformanceRegion(doc) {
     const hasHeaders = (node) => {
       const text = cleanText(node.textContent).toLowerCase();
-      return text.includes('ttft p50') && text.includes('ttft p95') && text.includes('ttft p99') &&
+      const legacyTable = text.includes('ttft p50') && text.includes('ttft p95') && text.includes('ttft p99') &&
         (text.includes('uptime') || text.includes('\u53ef\u7528\u7387') || text.includes('\u6b63\u5e38\u8fd0\u884c'));
+      const currentTable = text.includes('tps') &&
+        (text.includes('average ttft') || text.includes('average first token latency') ||
+          text.includes('\u5e73\u5747\u9996 token \u5ef6\u8fdf') || text.includes('\u9996 token \u5ef6\u8fdf')) &&
+        (text.includes('success rate') || text.includes('\u6210\u529f\u7387'));
+      return legacyTable || currentTable;
     };
     const table = Array.from(doc.querySelectorAll('table,[role="table"],[role="grid"]'))
       .find((node) => isRendered(node) && hasHeaders(node));
     if (table) return table;
 
-    const p50 = Array.from(doc.querySelectorAll('th,td,div,span')).find(
-      (node) => isRendered(node) && cleanText(node.textContent).toLowerCase() === 'ttft p50'
-    );
-    let region = p50?.parentElement || null;
+    const marker = Array.from(doc.querySelectorAll('th,td,div,span')).find((node) => {
+      if (!isRendered(node)) return false;
+      const text = cleanText(node.textContent).toLowerCase();
+      return text === 'ttft p50' || text === 'tps' || text === 'success rate' || text === '\u6210\u529f\u7387';
+    });
+    let region = marker?.parentElement || null;
     while (region && region !== doc.body) {
       if (isRendered(region) && hasHeaders(region) && cleanText(region.textContent).length < 20000) return region;
       region = region.parentElement;
@@ -292,6 +308,22 @@
         view: element.ownerDocument.defaultView
       }));
     });
+  }
+
+  function openPerformanceTab(doc) {
+    const dialogs = Array.from(doc.querySelectorAll('[role="dialog"]')).filter(isRendered);
+    const scope = dialogs.find((dialog) => cleanText(dialog.textContent).includes(MODEL)) || dialogs[0] || doc;
+    const label = Array.from(scope.querySelectorAll('button,a,span,div,[role="tab"],[role="button"]'))
+      .filter((node) => {
+        if (!isRendered(node)) return false;
+        const text = cleanText(node.textContent).toLowerCase();
+        return text === '\u6027\u80fd' || text === 'performance';
+      })
+      .sort((a, b) => a.children.length - b.children.length)[0];
+    if (!label) return false;
+    const tab = label.closest('button,a,[role="tab"],[role="button"]') || label;
+    if (!looksSelected(tab)) clickElement(tab);
+    return true;
   }
 
   function searchAndOpenModel(doc) {
@@ -362,6 +394,7 @@
           removeAnnouncementDialogs(doc);
           selection ||= searchAndOpenModel(doc);
           if (selection) {
+            selection.performanceOpened ||= openPerformanceTab(doc);
             const region = findPerformanceRegion(doc);
             const elapsed = Date.now() - selection.openedAt;
             const changed = region && regionSignature(region) !== selection.previousSignature;
@@ -387,7 +420,7 @@
     frame.src = `/pricing?xpt-performance=${Date.now()}`;
     document.documentElement.appendChild(frame);
     try {
-      const source = await waitForPricingTable(frame, 30000);
+      const source = await waitForPricingTable(frame, 12000);
       const clone = sanitizeClone(document.importNode(source, true));
       const wrapper = document.createElement('div');
       wrapper.className = 'xpt-clone';
@@ -489,7 +522,122 @@
     return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 3 }).format(value);
   }
 
+  function toFiniteNumber(value) {
+    if (value == null || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function normalizeSuccessRate(value) {
+    const rate = toFiniteNumber(value);
+    if (rate == null) return null;
+    return Math.max(0, Math.min(100, rate <= 1 ? rate * 100 : rate));
+  }
+
+  function formatLatency(value) {
+    const milliseconds = toFiniteNumber(value);
+    return milliseconds == null ? '\u2014' : `${(milliseconds / 1000).toFixed(2)}s`;
+  }
+
+  function formatTps(value) {
+    const tps = toFiniteNumber(value);
+    return tps == null ? '\u2014' : `${tps.toFixed(1)} t/s`;
+  }
+
+  function successRateTone(rate) {
+    if (rate >= 99) return 'xpt-good';
+    if (rate >= 95) return 'xpt-warn';
+    return 'xpt-bad';
+  }
+
+  function successRateHeight(rate) {
+    if (rate >= 99.9) return 100;
+    if (rate >= 99) return 88;
+    if (rate >= 95) return 72;
+    if (rate >= 90) return 55;
+    return 40;
+  }
+
+  function formatSeriesTime(timestamp) {
+    const value = toFiniteNumber(timestamp);
+    if (value == null) return '\u65f6\u95f4\u672a\u77e5';
+    const milliseconds = value > 1e12 ? value : value * 1000;
+    return new Intl.DateTimeFormat('zh-CN', {
+      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
+    }).format(new Date(milliseconds));
+  }
+
+  function createSuccessRateCell(group) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'xpt-success';
+
+    const points = (Array.isArray(group.series) ? group.series : [])
+      .map((point) => ({
+        ts: toFiniteNumber(point?.ts),
+        rate: normalizeSuccessRate(point?.success_rate)
+      }))
+      .filter((point) => point.rate != null)
+      .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
+      .slice(-24);
+    const fallbackRate = normalizeSuccessRate(group.success_rate);
+    const averageRate = points.length
+      ? points.reduce((sum, point) => sum + point.rate, 0) / points.length
+      : fallbackRate;
+
+    if (points.length) {
+      const spark = document.createElement('div');
+      spark.className = 'xpt-spark';
+      spark.setAttribute('role', 'img');
+      spark.setAttribute(
+        'aria-label',
+        `\u6700\u8fd1 24 \u5c0f\u65f6\u6210\u529f\u7387\uff0c\u6700\u65b0 ${points.at(-1).rate.toFixed(2)}%`
+      );
+      points.forEach((point, index) => {
+        const slot = document.createElement('span');
+        slot.className = `xpt-spark-slot ${successRateTone(point.rate)}${index === points.length - 1 ? ' xpt-latest' : ''}`;
+        slot.title = `${formatSeriesTime(point.ts)} \u00b7 ${point.rate.toFixed(2)}%${index === points.length - 1 ? ' \u00b7 \u6700\u65b0' : ''}`;
+        const bar = document.createElement('span');
+        bar.className = 'xpt-spark-bar';
+        bar.style.height = `${successRateHeight(point.rate)}%`;
+        slot.appendChild(bar);
+        spark.appendChild(slot);
+      });
+      wrapper.appendChild(spark);
+    }
+
+    const value = document.createElement('span');
+    value.className = 'xpt-success-value';
+    value.textContent = averageRate == null ? '\u2014' : `${averageRate.toFixed(1)}%`;
+    wrapper.appendChild(value);
+    return wrapper;
+  }
+
+  function renderPerformanceGroups(groups) {
+    const table = document.createElement('table');
+    table.className = 'xpt-table';
+    const headRow = table.createTHead().insertRow();
+    [TEXT.group, TEXT.throughput, TEXT.firstTokenLatency, TEXT.averageLatency, TEXT.successRate].forEach((label) => {
+      const th = document.createElement('th');
+      th.textContent = label;
+      headRow.appendChild(th);
+    });
+
+    const tbody = table.createTBody();
+    groups.forEach((group) => {
+      const tr = tbody.insertRow();
+      tr.insertCell().textContent = cleanText(group.group || group.name || group.label) || '\u2014';
+      tr.insertCell().textContent = formatTps(group.avg_tps);
+      tr.insertCell().textContent = formatLatency(group.avg_ttft_ms);
+      tr.insertCell().textContent = formatLatency(group.avg_latency_ms);
+      tr.insertCell().appendChild(createSuccessRateCell(group));
+    });
+    return table;
+  }
+
   function renderApiTable(payload) {
+    const groups = [payload?.groups, payload?.data?.groups].find((value) => Array.isArray(value) && value.length);
+    if (groups) return renderPerformanceGroups(groups);
+
     const rows = pickRows(payload);
     if (!rows.length) throw new Error('no group rows found in performance response');
     let columns = COLUMN_DEFS.map((column) => ({ ...column, key: findKey(rows, column.aliases) }))
@@ -519,15 +667,22 @@
   }
 
   async function loadFromApi() {
-    const response = await fetch(`/api/perf-metrics?model=${encodeURIComponent(MODEL)}&hours=24`, {
-      credentials: 'include',
-      headers: userHeaders(),
-      cache: 'no-store'
-    });
-    if (!response.ok) throw new Error(`performance API HTTP ${response.status}`);
-    const payload = await response.json();
-    if (payload?.success === false) throw new Error(payload.message || 'performance API returned failure');
-    return renderApiTable(payload?.data ?? payload);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await fetch(`/api/perf-metrics?model=${encodeURIComponent(MODEL)}&hours=24`, {
+        credentials: 'include',
+        headers: userHeaders(),
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`performance API HTTP ${response.status}`);
+      const payload = await response.json();
+      if (payload?.success === false) throw new Error(payload.message || 'performance API returned failure');
+      return renderApiTable(payload);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async function refreshPanel() {
@@ -538,13 +693,13 @@
 
     loadingPromise = (async () => {
       let content;
-      let source = TEXT.pricing;
+      let source = TEXT.api;
       try {
-        content = await cloneFromPricingPage();
-      } catch (error) {
-        console.debug('[xptoolkit] pricing table extraction failed; using API fallback', error);
-        source = TEXT.api;
         content = await loadFromApi();
+      } catch (error) {
+        console.debug('[xptoolkit] performance API failed; using pricing table fallback', error);
+        source = TEXT.pricing;
+        content = await cloneFromPricingPage();
       }
       const time = new Intl.DateTimeFormat('zh-CN', {
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
