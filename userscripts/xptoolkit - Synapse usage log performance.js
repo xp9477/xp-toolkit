@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xptoolkit - Synapse usage log performance
 // @namespace    https://github.com/xp9477/xp-toolkit
-// @version      1.0.0
+// @version      1.1.0
 // @description  Show the gpt-5.6-sol group performance table above common usage logs and suppress system announcements
 // @author       xp9477
 // @match        https://synapse-ai.uk/*
@@ -20,7 +20,7 @@
   const PANEL_ID = 'xpt-synapse-model-performance';
   const FRAME_ID = 'xpt-synapse-pricing-frame';
   const STYLE_ID = 'xpt-synapse-performance-style';
-  const REFRESH_MS = 5 * 60 * 1000;
+  const PAGE_RELOAD_MS = 2 * 60 * 1000;
   const TEXT = {
     title: MODEL + ' \u5404\u5206\u7ec4\u6027\u80fd',
     synced: '\u540c\u6b65\u81ea\u4ef7\u683c\u9875',
@@ -34,11 +34,13 @@
     failed: '\u8bfb\u53d6\u5931\u8d25',
     retry: '\u53ef\u70b9\u51fb\u201c\u5237\u65b0\u201d\u91cd\u8bd5',
     group: '\u5206\u7ec4',
+    firstTokenLatency: '\u9996 Token \u5ef6\u8fdf',
+    successRate: '\u6210\u529f\u7387',
     throughput: '\u541e\u5410\u91cf',
     uptime: '30 \u5929\u53ef\u7528\u7387'
   };
 
-  let refreshTimer = 0;
+  let pageReloadTimer = 0;
   let routeTimer = 0;
   let loadingPromise = null;
 
@@ -139,23 +141,24 @@
     style.id = STYLE_ID;
     style.textContent = `
       #${PANEL_ID}{width:100%;box-sizing:border-box;margin:0 0 16px;border:1px solid hsl(var(--border,214 32% 91%));border-radius:12px;background:hsl(var(--card,0 0% 100%));color:hsl(var(--card-foreground,222 47% 11%));box-shadow:0 1px 2px rgb(0 0 0/.05);overflow:hidden}
-      #${PANEL_ID} .xpt-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid hsl(var(--border,214 32% 91%))}
-      #${PANEL_ID} .xpt-title{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap}
-      #${PANEL_ID} .xpt-title strong{font-size:15px;line-height:1.4}
-      #${PANEL_ID} .xpt-title span,#${PANEL_ID} .xpt-meta,#${PANEL_ID} .xpt-status{color:hsl(var(--muted-foreground,215 16% 47%));font-size:12px}
-      #${PANEL_ID} .xpt-refresh{flex:0 0 auto;height:30px;padding:0 11px;border:1px solid hsl(var(--border,214 32% 91%));border-radius:7px;background:transparent;color:inherit;cursor:pointer;font-size:12px}
+      #${PANEL_ID} .xpt-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 12px;border-bottom:1px solid hsl(var(--border,214 32% 91%))}
+      #${PANEL_ID} .xpt-title{display:flex;align-items:baseline;gap:6px;min-width:0;flex-wrap:wrap}
+      #${PANEL_ID} .xpt-title strong{font-size:14px;line-height:1.2}
+      #${PANEL_ID} .xpt-title span,#${PANEL_ID} .xpt-meta,#${PANEL_ID} .xpt-status{color:hsl(var(--muted-foreground,215 16% 47%));font-size:11px}
+      #${PANEL_ID} .xpt-refresh{flex:0 0 auto;height:24px;padding:0 9px;border:1px solid hsl(var(--border,214 32% 91%));border-radius:6px;background:transparent;color:inherit;cursor:pointer;font-size:11px}
       #${PANEL_ID} .xpt-refresh:hover{background:hsl(var(--accent,210 40% 96%))}
       #${PANEL_ID} .xpt-refresh:disabled{cursor:wait;opacity:.55}
-      #${PANEL_ID} .xpt-body{padding:14px 16px 16px;overflow-x:auto}
-      #${PANEL_ID} .xpt-status{min-height:42px;display:flex;align-items:center}
-      #${PANEL_ID} .xpt-meta{margin-top:8px;text-align:right}
-      #${PANEL_ID} .xpt-clone{min-width:720px}
+      #${PANEL_ID} .xpt-body{padding:7px 12px 8px;overflow-x:auto}
+      #${PANEL_ID} .xpt-status{min-height:22px;display:flex;align-items:center}
+      #${PANEL_ID} .xpt-meta{margin-top:4px;text-align:right}
+      #${PANEL_ID} .xpt-clone{min-width:720px;font-size:12px;line-height:1.15}
       #${PANEL_ID} .xpt-clone table,#${PANEL_ID} .xpt-table{width:100%!important;min-width:720px;border-collapse:collapse}
-      #${PANEL_ID} .xpt-table th,#${PANEL_ID} .xpt-table td{padding:9px 12px;border-bottom:1px solid hsl(var(--border,214 32% 91%));text-align:left;white-space:nowrap;font-size:13px}
+      #${PANEL_ID} .xpt-clone th,#${PANEL_ID} .xpt-clone td,#${PANEL_ID} .xpt-table th,#${PANEL_ID} .xpt-table td{height:auto!important;min-height:0!important;padding:4px 10px!important;line-height:1.15!important;white-space:nowrap;font-size:12px!important}
+      #${PANEL_ID} .xpt-table th,#${PANEL_ID} .xpt-table td{border-bottom:1px solid hsl(var(--border,214 32% 91%));text-align:left}
       #${PANEL_ID} .xpt-table th{color:hsl(var(--muted-foreground,215 16% 47%));background:hsl(var(--muted,210 40% 96%));font-weight:600}
       #${PANEL_ID} .xpt-table tbody tr:hover{background:hsl(var(--accent,210 40% 96%))}
       #${FRAME_ID}{position:fixed!important;left:-20000px!important;top:0!important;width:1600px!important;height:1200px!important;opacity:0!important;pointer-events:none!important;border:0!important;z-index:-2147483648!important}
-      @media(max-width:720px){#${PANEL_ID} .xpt-head{align-items:flex-start}#${PANEL_ID} .xpt-body{padding:10px 12px 14px}}
+      @media(max-width:720px){#${PANEL_ID} .xpt-head{align-items:flex-start}#${PANEL_ID} .xpt-body{padding:5px 8px 7px}}
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -422,7 +425,7 @@
 
   function candidateScore(row) {
     const keys = Object.keys(flatten(row)).map(canonical);
-    return ['group', 'ttftp50', 'ttftp95', 'ttftp99', 'uptime', 'throughput', 'tps']
+    return ['group', 'firsttokenlatency', 'ttft', 'successrate', 'ttftp50', 'ttftp95', 'ttftp99', 'uptime', 'throughput', 'tps']
       .reduce((sum, signal) => sum + (keys.some((key) => key.includes(signal)) ? 2 : 0), 0);
   }
 
@@ -456,11 +459,13 @@
 
   const COLUMN_DEFS = [
     { label: TEXT.group, aliases: ['group', 'groupname', 'name', 'label'] },
+    { label: TEXT.firstTokenLatency, aliases: ['firsttokenlatency', 'firsttoken', 'latencyfirsttoken', 'avgttft', 'ttftavg', 'averagettft', 'meanttft'] },
+    { label: TEXT.successRate, aliases: ['successrate', 'requestsuccessrate', 'successratio'] },
     { label: 'TTFT P50', aliases: ['ttftp50', 'p50ttft', 'p50'] },
     { label: 'TTFT P95', aliases: ['ttftp95', 'p95ttft', 'p95'] },
     { label: 'TTFT P99', aliases: ['ttftp99', 'p99ttft', 'p99'] },
     { label: TEXT.throughput, aliases: ['tokenspersecond', 'outputtps', 'throughput', 'tps'] },
-    { label: TEXT.uptime, aliases: ['uptime30d', 'uptime', 'availability', 'successrate30d'] }
+    { label: TEXT.uptime, aliases: ['uptime30d', 'uptime', 'availability30d', 'availability'] }
   ];
 
   function findKey(rows, aliases) {
@@ -533,13 +538,13 @@
 
     loadingPromise = (async () => {
       let content;
-      let source = TEXT.api;
+      let source = TEXT.pricing;
       try {
-        content = await loadFromApi();
-      } catch (error) {
-        console.debug('[xptoolkit] performance API failed; using pricing page fallback', error);
-        source = TEXT.pricing;
         content = await cloneFromPricingPage();
+      } catch (error) {
+        console.debug('[xptoolkit] pricing table extraction failed; using API fallback', error);
+        source = TEXT.api;
+        content = await loadFromApi();
       }
       const time = new Intl.DateTimeFormat('zh-CN', {
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
@@ -557,8 +562,8 @@
   function clearPanel() {
     document.getElementById(PANEL_ID)?.remove();
     document.getElementById(FRAME_ID)?.remove();
-    clearInterval(refreshTimer);
-    refreshTimer = 0;
+    clearTimeout(pageReloadTimer);
+    pageReloadTimer = 0;
   }
 
   function onRouteChange() {
@@ -574,7 +579,12 @@
         return;
       }
       refreshPanel();
-      if (!refreshTimer) refreshTimer = setInterval(refreshPanel, REFRESH_MS);
+      if (!pageReloadTimer) {
+        pageReloadTimer = setTimeout(() => {
+          pageReloadTimer = 0;
+          if (TARGET_PATH.test(location.pathname)) location.reload();
+        }, PAGE_RELOAD_MS);
+      }
     }, 50);
   }
 
