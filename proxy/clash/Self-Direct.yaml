@@ -13,3 +13,4 @@ payload:
   - DOMAIN-SUFFIX,x6d.com
   - DOMAIN-SUFFIX,apple.com
   - DOMAIN-SUFFIX,letsencrypt.org
+  - DOMAIN-SUFFIX,linuxdo.org
