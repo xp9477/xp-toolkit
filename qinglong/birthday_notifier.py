@@ -16,7 +16,8 @@ DEFAULT_TARGET_INTERVALS = [0, 1, 3, 5]
 
 
 def send_notification(title, message):
-    notify.send(title, message)
+    if notify.send(title, message) is not True:
+        raise RuntimeError("生日通知发送失败")
 
 
 def load_birthdays():
