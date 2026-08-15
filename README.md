@@ -12,7 +12,7 @@
 | `proxy/quanx/` | Quantumult X 规则 |
 | `skills/` | 自建 Codex / Agent Skills |
 | `raycast/` | 预留：Raycast 插件 |
-| `scriptable/` | iOS Scriptable 组件与脚本（含 CPA Anti Gravity / Grok 配额小组件） |
+| `scriptable/` | iOS Scriptable 组件与脚本（AI 套餐用量） |
 | `userscripts/` | 浏览器油猴脚本 |
 | `.github/` | 规则跨端同步 CI |
 

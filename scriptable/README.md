@@ -2,46 +2,47 @@
 
 iOS [Scriptable](https://scriptable.app) 组件与脚本。
 
-## CPA-Quota.js
+## AI-Quota.js
 
-在桌面显示 CPA（CLI Proxy API）里的 **Anti Gravity** 与 **Grok** 配额。
+中号组件，并排监控 **SuperGrok**、**ChatGPT Plus**、**Google AI Pro** 的剩余用量。
 
-### 样式
-
-深色紫黑背景、圆环已用百分比、分项进度条、底部 chips，参考 Claude Code Usage 小组件。
+背景不着色，跟随 iOS 小组件系统浅色 / 深色。排版按 Notion / Instapaper：单色 logo、发丝分割线、New York 剩余百分比。
 
 ### 数据源
 
-1. `GET /v0/management/auth-files` 发现 `antigravity` / `xai` 认证
-2. `POST /v0/management/api-call` 代理上游配额接口：
-   - Anti Gravity → `retrieveUserQuotaSummary`
-   - Grok → `cli-chat-proxy.grok.com/v1/billing?format=credits`
+| 套餐 | 怎么取 | 主数字 |
+|---|---|---|
+| SuperGrok | 本脚本读 CPA 的 xAI 认证，再请求 `billing?format=credits` | 周额度剩余 |
+| ChatGPT Plus | 本脚本读 CPA 的 OpenAI / Codex 认证，再请求 `backend-api/wham/usage` | 按窗口时长判断，现在多为 7 天 |
+| Google AI Pro | 本脚本读 CPA 的 Anti Gravity 认证，再请求 `retrieveUserQuotaSummary` | 本周 / Gemini 桶 |
+
+ChatGPT 不要按 `primary_window = 5 小时` 硬套。2026 年 7 月起 Plus / Pro 常把 5 小时窗口拿掉，`primary_window` 直接是 `604800`（7 天），`secondary_window` 为 `null`。TokenYou、CodexBar、CodeBurn 都是用窗口时长打标签，不是用字段位置。
+
+这些是各产品网页用量页自己的接口，非官方公开 API，字段可能变。脚本只读配额。
 
 ### 安装
 
-1. 用 Scriptable 导入 `CPA-Quota.js`（或复制内容新建脚本）
-2. 在 App 内运行一次，填写 Base URL 与 API Key
-3. 长按桌面 → 添加 Scriptable 小组件 → 选择本脚本  
-   推荐尺寸：**Medium** / **Large**
+1. 用 Scriptable 导入 `AI-Quota.js`（或复制内容新建脚本）
+2. 在 App 内运行一次，填写 CPA 地址和 API Key
+3. 长按桌面 → 添加 Scriptable → 选本脚本 → **中号**
+
+以前配过 CPA 的话，地址和 Key 还在 Keychain 里，不用重填。CPA 里需要有 xAI、OpenAI/Codex、Anti Gravity 三份认证。
 
 ### 配置
 
 | 方式 | 说明 |
 |---|---|
-| Keychain | App 内运行脚本写入（推荐） |
-| 小组件参数 JSON | `{"baseUrl":"https://host:port","apiKey":"xxx"}` |
-| 小组件参数简写 | `https://host:port\|apiKey` 或仅 `apiKey` |
+| Keychain | App 内运行写入（推荐） |
+| 小组件参数 JSON | `{"cpaBaseUrl":"https://host:port","cpaApiKey":"..."}` |
 
-默认 Base URL 可按自己的 CPA 地址修改；**不要把真实 API Key 提交进仓库**。
+**不要把真实 Token / Cookie 提交进仓库。**
 
 ### 刷新
 
-- 缓存约 5 分钟
-- 小组件建议刷新间隔 15 分钟（系统实际刷新不可保证）
+组件请求 15 分钟后再刷新，本地缓存 10 分钟。
 
-### 圆环含义
+桌面小组件实际间隔由 iOS 决定，常见 15–30 分钟，锁屏或省电时更久。`refreshAfterDate` 只是最早可刷新时间，不是定时器。
 
-圆环与进度条均表示 **已用百分比**：
+别人怎么做：浏览器插件（TokenYou）5 分钟拉一次；菜单栏应用（Codex Rate Watcher）60 秒一次，因为要算消耗速度。周额度变化慢，Scriptable 再快也刷不动，15 分钟够用，也少打非官方接口。
 
-- Anti Gravity：主环默认看 Claude/GPT 组；条为 Gemini / Claude·GPT
-- Grok：主环为周 credits；条为 Build / Imagine / Chat
+点某一行会打开对应网站。数字是 **剩余百分比**；低于约 22% 进度条改为琥珀色。
