@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xptoolkit - 4KHD 自动合并分页图片去懒加载
 // @namespace    https://github.com/xp9477/xp-toolkit
-// @version      2.0.9
+// @version      2.0.10
 // @description  合并分页图片、去懒加载；桌面端可标记 album / 图片为喜欢，并与 EasySearch iOS 云端同步
 // @author       xp9477
 // @match        https://www.4khd.com/content/*/*.html*
@@ -54,12 +54,9 @@
       const value = GM_getValue(key, fallback);
       return value === undefined ? fallback : value;
     } catch (_) {
-      try {
-        const raw = localStorage.getItem(key);
-        return raw == null ? fallback : JSON.parse(raw);
-      } catch {
-        return fallback;
-      }
+      // 会话含 access/refresh token，绝不能降级到页面可读的 localStorage。
+      console.warn('[xptoolkit] Tampermonkey storage unavailable; refusing page storage fallback');
+      return fallback;
     }
   }
 
@@ -67,7 +64,7 @@
     try {
       GM_setValue(key, value);
     } catch (_) {
-      localStorage.setItem(key, JSON.stringify(value));
+      throw new Error('Tampermonkey 安全存储不可用，已拒绝写入页面 localStorage');
     }
   }
 
@@ -75,7 +72,7 @@
     try {
       GM_deleteValue(key);
     } catch (_) {
-      localStorage.removeItem(key);
+      console.warn('[xptoolkit] Tampermonkey storage unavailable; secure value was not changed');
     }
   }
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xptoolkit - A股擂台最近成交置顶
 // @namespace    https://github.com/xp9477/xp-toolkit
-// @version      1.1.0
+// @version      1.1.1
 // @description  将 asharecompetition.fun 的「最近成交」置顶，并排显示持仓；默认只看 Kimi-K3
 // @author       xp9477
 // @match        https://asharecompetition.fun/*
@@ -397,10 +397,10 @@
     if (viewBox) {
       if (view && view.textContent.trim()) {
         viewBox.hidden = false;
-        viewBox.innerHTML = view.innerHTML;
+        viewBox.textContent = view.textContent.trim();
       } else {
         viewBox.hidden = true;
-        viewBox.innerHTML = '';
+        viewBox.replaceChildren();
       }
     }
 
@@ -408,8 +408,33 @@
     const dest = posPanel.querySelector('#xpt-pos-body');
     const src = document.querySelector(`[data-pos="${id}"]`);
     if (dest) {
-      if (src) dest.innerHTML = src.innerHTML;
-      else dest.innerHTML = '<tr><td colspan="6" class="muted">暂无持仓数据</td></tr>';
+      dest.replaceChildren();
+      if (src) {
+        src.querySelectorAll('tr').forEach((sourceRow) => {
+          const row = document.createElement('tr');
+          sourceRow.querySelectorAll(':scope > th, :scope > td').forEach((sourceCell) => {
+            const cell = document.createElement(sourceCell.tagName.toLowerCase());
+            cell.textContent = sourceCell.textContent || '';
+            cell.className = sourceCell.className;
+            for (const attribute of ['colspan', 'rowspan', 'scope']) {
+              if (sourceCell.hasAttribute(attribute)) {
+                cell.setAttribute(attribute, sourceCell.getAttribute(attribute));
+              }
+            }
+            row.appendChild(cell);
+          });
+          if (row.children.length) dest.appendChild(row);
+        });
+      }
+      if (!dest.children.length) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 6;
+        cell.className = 'muted';
+        cell.textContent = '暂无持仓数据';
+        row.appendChild(cell);
+        dest.appendChild(row);
+      }
     }
   }
 

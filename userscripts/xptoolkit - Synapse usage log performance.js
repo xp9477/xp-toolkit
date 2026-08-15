@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xptoolkit - Synapse usage log performance
 // @namespace    https://github.com/xp9477/xp-toolkit
-// @version      1.1.2
+// @version      1.1.3
 // @description  Show the gpt-5.6-sol group performance table above common usage logs and suppress system announcements
 // @author       xp9477
 // @match        https://synapse-ai.uk/*
@@ -61,13 +61,8 @@
     return value;
   }
 
-  // Axios/XHR responses are normally passed through JSON.parse.
   const nativeJSONParse = JSON.parse.bind(JSON);
-  JSON.parse = function xptJSONParse(text, reviver) {
-    return stripAnnouncements(nativeJSONParse(text, reviver));
-  };
-
-  // Also cover pages that use fetch for /api/status.
+  // 只修改已知 /api/status 响应；不要污染站点全局 JSON.parse。
   if (typeof window.fetch === 'function') {
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async function xptFetch(input, init) {
@@ -367,15 +362,27 @@
   }
 
   function sanitizeClone(node) {
-    node.removeAttribute?.('id');
-    node.querySelectorAll?.('[id]').forEach((item) => item.removeAttribute('id'));
-    node.querySelectorAll?.('script,iframe').forEach((item) => item.remove());
-    node.querySelectorAll?.('button,a').forEach((item) => {
-      item.removeAttribute('href');
-      item.style.pointerEvents = 'none';
+    const allowedTags = new Set([
+      'B', 'CAPTION', 'COL', 'COLGROUP', 'DIV', 'EM', 'P', 'SECTION', 'SMALL',
+      'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TFOOT', 'TH', 'THEAD', 'TR'
+    ]);
+    const allowedAttributes = new Set([
+      'aria-label', 'class', 'colspan', 'role', 'rowspan', 'scope'
+    ]);
+    const holder = document.createElement('div');
+    holder.appendChild(node);
+    Array.from(holder.querySelectorAll('*')).forEach((element) => {
+      if (!allowedTags.has(element.tagName)) {
+        element.replaceWith(document.createTextNode(element.textContent || ''));
+        return;
+      }
+      Array.from(element.attributes).forEach((attribute) => {
+        if (!allowedAttributes.has(attribute.name.toLowerCase())) {
+          element.removeAttribute(attribute.name);
+        }
+      });
     });
-    node.querySelectorAll?.('[aria-controls]').forEach((item) => item.removeAttribute('aria-controls'));
-    return node;
+    return holder;
   }
 
   function waitForPricingTable(frame, timeoutMs) {
