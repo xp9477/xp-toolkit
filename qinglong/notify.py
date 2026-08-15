@@ -115,7 +115,8 @@ def get_bark_push() -> str:
         try:
             config = json.loads(raw)
         except json.JSONDecodeError:
-            return raw
+            print(f"notify JSON 配置无效（内容已隐藏，{len(raw)} 字符）")
+            return ""
         if isinstance(config, dict):
             return _extract_key_from_mapping(config)
         return ""
@@ -153,7 +154,10 @@ def _send_bark_get(
     server: str, device_key: str, title: str, content: str
 ) -> tuple[bool, str]:
     # GET 路径方式对长中文不友好，仅作后备
-    url = f"{server.rstrip('/')}/{device_key}/{quote(title)}/{quote(content)}"
+    url = (
+        f"{server.rstrip('/')}/{quote(device_key, safe='')}/"
+        f"{quote(title, safe='')}/{quote(content, safe='')}"
+    )
     if len(url) > 1800:
         return False, f"GET URL 过长({len(url)}), 已跳过"
     resp = requests.get(url, timeout=REQUEST_TIMEOUT)

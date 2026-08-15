@@ -15,6 +15,20 @@ import notify
 
 
 class BarkSecurityTests(unittest.TestCase):
+    def test_malformed_json_is_not_sent_as_a_device_key(self):
+        malformed = '{"bark":"secret-device-key"'
+        output = io.StringIO()
+        with (
+            patch.dict(os.environ, {"notify": malformed}, clear=True),
+            patch.object(notify, "_send_bark_post") as send_post,
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertFalse(notify.send("title", "body"))
+
+        send_post.assert_not_called()
+        self.assertNotIn("secret-device-key", output.getvalue())
+        self.assertIn("JSON 配置无效", output.getvalue())
+
     def test_plain_http_is_rejected_without_logging_the_secret(self):
         secret = "device-secret-value"
         output = io.StringIO()
@@ -50,6 +64,23 @@ class BarkSecurityTests(unittest.TestCase):
         ):
             self.assertTrue(notify.send("title", "body"))
         send_get.assert_called_once()
+
+    @patch.object(notify.requests, "get")
+    def test_explicit_get_fallback_encodes_path_separators(self, get):
+        response = get.return_value
+        response.status_code = 200
+        response.json.return_value = {"code": 200}
+
+        ok, _detail = notify._send_bark_get(
+            "https://push.example",
+            "device/key",
+            "title/segment",
+            "body/segment",
+        )
+
+        self.assertTrue(ok)
+        requested_url = get.call_args.args[0]
+        self.assertIn("device%2Fkey/title%2Fsegment/body%2Fsegment", requested_url)
 
 
 if __name__ == "__main__":
