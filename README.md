@@ -14,7 +14,13 @@
 | `raycast/` | 预留：Raycast 插件 |
 | `scriptable/` | iOS Scriptable 组件与脚本（AI 套餐用量） |
 | `userscripts/` | 浏览器油猴脚本 |
-| `.github/` | 规则跨端同步 CI |
+| `.github/` | 质量门禁、依赖更新与规则跨端同步 CI |
+
+## 维护入口
+
+- [架构与扩展边界](docs/architecture.md)
+- [贡献与本地验证](CONTRIBUTING.md)
+- [2026-08-15 安全与架构审计](docs/2026-08-15-security-and-architecture-audit.md)
 
 ## 代理规则同步
 
@@ -28,13 +34,13 @@ Clash 和 QuanX 文件由脚本生成：
 修改 Loon 源后，在提交前运行：
 
 ```bash
-python .github/scripts/sync_rules.py
+python3 .github/scripts/sync_rules.py
 ```
 
 同步后校验（冲突检测 + 三端一致性）：
 
 ```bash
-python .github/scripts/check_rules.py --offline
+python3 .github/scripts/check_rules.py --offline
 ```
 
 PR 会拒绝未提交或被手工修改的生成文件。直接推送到 `main` 时，GitHub Actions
@@ -52,7 +58,7 @@ https://raw.githubusercontent.com/xp9477/xp-toolkit/main/proxy/clash/Self-Proxy.
 校验线上链接可用性：
 
 ```bash
-python .github/scripts/check_rules.py
+python3 .github/scripts/check_rules.py
 ```
 
 ## 来源
@@ -67,3 +73,5 @@ python .github/scripts/check_rules.py
 
 - 不要提交 cookie、token、`.env` 等敏感信息
 - 抓包产物 `mitm_responses/` 默认忽略，不入库
+- 携带凭据的远端默认必须使用 HTTPS；本机 HTTP 例外需显式配置
+- 删除类任务默认 dry-run，并把数据删除和文件删除分开授权
