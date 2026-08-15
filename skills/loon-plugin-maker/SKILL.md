@@ -10,11 +10,12 @@ description: Create Loon proxy plugins by analyzing mitmproxy traffic and modify
 ### 1. 配置 mitmproxy 自动保存响应
 
 ```bash
-mitmdump -s <skill_dir>/scripts/save_responses.py -p 8080
+MITM_CAPTURE_HOSTS=api.example.com,account.example.com \
+  mitmdump -s <skill_dir>/scripts/save_responses.py -p 8080
 ```
 
-脚本自动将响应保存到 `mitm_responses/` 目录。抓包前先限定目标 hostname，
-避免把无关 App 的 Cookie、Token 或个人数据写入磁盘。
+脚本只保存白名单 hostname 的响应到 `mitm_responses/`。默认脱敏认证头、Cookie、
+敏感查询参数和 JSON Token，并限制响应体为 1 MiB；未设置白名单时不抓取。
 
 ### 2. 抓包并全面分析
 

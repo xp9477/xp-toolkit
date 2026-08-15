@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-SAVE_DIR = "mitm_responses"
+SAVE_DIR = os.getenv("MITM_CAPTURE_DIR", "mitm_responses")
 
 def analyze_all():
     if not os.path.exists(SAVE_DIR):
