@@ -24,7 +24,8 @@ class Script:
     def run(self) -> bool:
         if self.username:
             print(f"账号 [{self.username}]")
-        print(f"账号配置: {self.account}")
+        # 账号对象通常包含 cookie、密码或 token，模板不能示范整体输出配置。
+        print("示例任务执行完成")
         return True
 
 
