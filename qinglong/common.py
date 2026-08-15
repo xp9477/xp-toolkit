@@ -182,7 +182,8 @@ def load_accounts(file_path: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 item = json.loads(line)
             except json.JSONDecodeError as exc:
                 print(f"解析环境变量 {env_name} 第 {line_number} 行失败: {exc}")
-                print(f"问题内容: {line}")
+                # 配置行通常包含 cookie、密码或 API key，不能把原文写进任务日志。
+                print(f"问题内容已隐藏（{len(line)} 字符）")
                 continue
             _append_account(accounts, item, env_name, line_number)
 
