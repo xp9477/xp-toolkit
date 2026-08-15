@@ -1,6 +1,14 @@
 name: Sync Rules
 
 on:
+  pull_request:
+    paths:
+      - "proxy/loon/Self-Direct.list"
+      - "proxy/loon/Self-Proxy.list"
+      - "proxy/clash/Self-Direct.yaml"
+      - "proxy/clash/Self-Proxy.yaml"
+      - "proxy/quanx/Self-Direct.list"
+      - "proxy/quanx/Self-Proxy.list"
   push:
     branches:
       - main
@@ -14,11 +22,35 @@ on:
 
 concurrency:
   group: sync-rules-${{ github.ref }}
-  cancel-in-progress: false
+  # 新任务总是从最新 main 的两份 Loon 源全量生成，旧任务可以安全取消。
+  cancel-in-progress: true
 
 jobs:
-  sync:
-    if: github.actor != 'github-actions[bot]'
+  validate-generated:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify generated files are committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/sync_rules.py
+          python .github/scripts/check_rules.py --offline
+          git diff --exit-code -- proxy/clash/ proxy/quanx/
+
+  sync-main:
+    if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -34,44 +66,29 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Sync every changed rule source
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          AFTER_SHA: ${{ github.sha }}
+      - name: Regenerate from latest canonical sources
         shell: bash
         run: |
           set -euo pipefail
-          rule_paths=(
-            proxy/loon/Self-Direct.list
-            proxy/loon/Self-Proxy.list
-            proxy/clash/Self-Direct.yaml
-            proxy/clash/Self-Proxy.yaml
-            proxy/quanx/Self-Direct.list
-            proxy/quanx/Self-Proxy.list
-          )
-          if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
-            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$AFTER_SHA" -- "${rule_paths[@]}")
-          else
-            mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" -- "${rule_paths[@]}")
-          fi
-          if (( ${#changed[@]} == 0 )); then
-            echo "No rule source changed"
-            exit 0
-          fi
-          python .github/scripts/sync_rules.py "${changed[@]}"
-          python .github/scripts/check_rules.py --offline
-
-      - name: Commit generated rules
-        shell: bash
-        run: |
-          set -euo pipefail
-          git add proxy/loon/ proxy/clash/ proxy/quanx/
-          if git diff --staged --quiet; then
-            echo "Generated rules already match"
-            exit 0
-          fi
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git commit -m "chore(proxy): sync generated rules"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout --detach origin/main
+            python .github/scripts/sync_rules.py
+            python .github/scripts/check_rules.py --offline
+            git add proxy/clash/ proxy/quanx/
+            if git diff --staged --quiet; then
+              echo "Generated rules already match canonical Loon sources"
+              exit 0
+            fi
+            git commit -m "chore(proxy): sync generated rules"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            if (( attempt == 3 )); then
+              echo "Unable to push generated rules after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 2))
+          done

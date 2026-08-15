@@ -88,9 +88,5 @@ class ConflictTests(unittest.TestCase):
             )
         )
 
-    def test_repository_rules_are_consistent(self):
-        self.assertEqual(check_rules.main(["--offline"]), 0)
-
-
 if __name__ == "__main__":
     unittest.main()

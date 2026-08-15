@@ -18,22 +18,17 @@
 
 ## 代理规则同步
 
-修改任一端的 `Self-Direct` / `Self-Proxy` 后，GitHub Actions 会同步到其他两端：
+`proxy/loon/Self-Direct.list` 与 `Self-Proxy.list` 是唯一人工维护的数据源；
+Clash 和 QuanX 文件由脚本生成：
 
 - Loon: `proxy/loon/*.list`
 - Clash: `proxy/clash/*.yaml`
 - QuanX: `proxy/quanx/*.list`
 
-本地也可手动同步（默认以 Loon 为源）：
+修改 Loon 源后，在提交前运行：
 
 ```bash
 python .github/scripts/sync_rules.py
-```
-
-或指定变更文件：
-
-```bash
-python .github/scripts/sync_rules.py proxy/loon/Self-Direct.list
 ```
 
 同步后校验（冲突检测 + 三端一致性）：
@@ -41,6 +36,9 @@ python .github/scripts/sync_rules.py proxy/loon/Self-Direct.list
 ```bash
 python .github/scripts/check_rules.py --offline
 ```
+
+PR 会拒绝未提交或被手工修改的生成文件。直接推送到 `main` 时，GitHub Actions
+也会从最新 Loon 源重新生成，避免多端同时编辑造成静默覆盖。
 
 ## 规则分发
 
