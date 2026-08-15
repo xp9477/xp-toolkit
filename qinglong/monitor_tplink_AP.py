@@ -4,15 +4,13 @@ cron: 0 * * * *
 description: 监控 TP-Link AP 在线数量
 
 env:
-- `monitor_tplink_AP`: {"url": "...", "username": "...", "password": "...", "expected_count": 4}
+- `monitor_tplink_AP`: {"url": "https://ap.local", "username": "...", "password": "...", "expected_count": 4}
+- 自签证书推荐配置 `"ca_bundle":"/path/device-ca.pem"`；仅迁移期可显式配置 `"verify_tls":false`
 """
 
 import notify
 import requests
-import urllib3
-from common import load_config, run_single_script
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from common import load_config, parse_bool, run_single_script, validate_service_origin
 
 
 def load_monitor_config():
@@ -20,25 +18,36 @@ def load_monitor_config():
     if not isinstance(config, dict):
         raise ValueError("monitor_tplink_AP 配置必须为 JSON 对象")
 
-    url = config.get("url", "").rstrip("/")
+    verify_tls = parse_bool(config.get("verify_tls"), default=True, field_name="verify_tls")
+    ca_bundle = str(config.get("ca_bundle") or "").strip()
+    url = validate_service_origin(
+        config.get("url", ""),
+        field_name="url",
+        allow_http=not verify_tls,
+    )
     username = config.get("username", "")
     password = config.get("password", "")
     expected_count = config.get("expected_count", 4)
 
-    if not url or not username or not password:
-        raise ValueError("monitor_tplink_AP 配置缺少 url/username/password")
+    if not username or not password:
+        raise ValueError("monitor_tplink_AP 配置缺少 username/password")
+    if ca_bundle and not verify_tls:
+        raise ValueError("ca_bundle 与 verify_tls=false 不能同时使用")
 
     return {
         "url": url,
         "username": username,
         "password": password,
         "expected_count": expected_count,
+        "verify": ca_bundle or verify_tls,
     }
 
 
 def main():
     config = load_monitor_config()
     base_url = config["url"]
+    if config["verify"] is False:
+        print("警告: 已显式关闭 TP-Link TLS 校验，管理员凭据可能被窃取")
 
     headers = {
         "Accept": "text/plain, */*; q=0.01",
@@ -61,7 +70,13 @@ def main():
         },
     }
 
-    response = requests.post(f"{base_url}/", headers=headers, json=login_payload, verify=False, timeout=30)
+    response = requests.post(
+        f"{base_url}/",
+        headers=headers,
+        json=login_payload,
+        verify=config["verify"],
+        timeout=(10, 30),
+    )
     response.raise_for_status()
     stok = response.json()["stok"]
 
@@ -86,8 +101,8 @@ def main():
         f"{base_url}/stok={stok}/ds",
         headers=headers,
         json=query_payload,
-        verify=False,
-        timeout=30,
+        verify=config["verify"],
+        timeout=(10, 30),
     )
     response.raise_for_status()
     ap_list_num = response.json()["apmng_upgrade"]["count"]["ap_list"]

@@ -16,7 +16,7 @@ import urllib.request
 from typing import Any
 
 import notify
-from common import run_account_scripts
+from common import run_account_scripts, validate_service_origin
 
 DEFAULT_SCHEMA = "easysearch"
 DEFAULT_TABLE = "ut_entries"
@@ -54,7 +54,7 @@ class Script:
         self.account.setdefault("name", self.config["name"])
 
     def _normalize(self, account: dict[str, Any]) -> dict[str, Any]:
-        base_url = pick_text(account, "url", "base_url", "project_url").rstrip("/")
+        raw_base_url = pick_text(account, "url", "base_url", "project_url")
         schema = pick_text(account, "schema") or DEFAULT_SCHEMA
         table = pick_text(account, "table") or DEFAULT_TABLE
         select = pick_text(account, "select") or DEFAULT_SELECT
@@ -70,8 +70,7 @@ class Script:
         timeout = parse_positive_int(account.get("timeout"), DEFAULT_TIMEOUT, "timeout")
         name = pick_text(account, "name", "username") or f"{schema}.{table}"
 
-        if not base_url:
-            raise ValueError("缺少 url")
+        base_url = validate_service_origin(raw_base_url, field_name="url")
         if not secret_key:
             raise ValueError("缺少 secret_key")
 
@@ -112,13 +111,13 @@ class Script:
                     f'http={response.status}, schema={config["schema"]}, table={config["table"]}'
                 )
                 if body:
-                    print(body)
+                    print(f'[{config["name"]}] response_bytes={len(body.encode("utf-8"))}')
                 return True
         except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
+            body = exc.read()
             message = f'[{config["name"]}] keepalive failed: http={exc.code}'
             if body:
-                message = f"{message}, body={body}"
+                message = f"{message}, response_bytes={len(body)}"
             if exc.code == 540:
                 message = f"{message}。项目已暂停，请先在 Supabase Dashboard 恢复"
             raise ValueError(message) from exc

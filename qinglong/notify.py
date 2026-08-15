@@ -4,6 +4,8 @@ env:
 - `notify`: Bark 设备 key（推荐纯字符串），或 JSON，例如:
   {"bark": "xxx"} / {"bark_push": "xxx"} / {"push": "xxx"} / {"token": "xxx"}
   也支持完整推送地址: "https://api.day.app/xxx" 或自建服务器地址
+- `BARK_ALLOW_INSECURE_HTTP`: 默认 false；仅迁移无法启用 TLS 的自建服务时显式设为 true
+- `BARK_ALLOW_GET`: 默认 false；仅兼容不支持 POST 的旧服务时显式设为 true
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ except ImportError:  # 青龙通常有；本地调试可无
     def load_dotenv(*_a, **_k):
         return False
 
-from common import get_env, get_script_env_name
+from common import get_env, get_script_env_name, parse_bool, validate_service_origin
 
 load_dotenv()
 
@@ -51,7 +53,7 @@ def _extract_key_from_mapping(config: dict[str, Any]) -> str:
     )
 
 
-def _normalize_bark_target(raw: str) -> tuple[str, str]:
+def _normalize_bark_target(raw: str, *, allow_insecure_http: bool = False) -> tuple[str, str]:
     """
     返回 (server_base, device_key)。
     支持:
@@ -69,9 +71,15 @@ def _normalize_bark_target(raw: str) -> tuple[str, str]:
 
     parsed = urlparse(value)
     if not parsed.scheme or not parsed.netloc:
-        return DEFAULT_BARK_HOST, value.strip("/")
+        raise ValueError("Bark 地址格式无效")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Bark 地址不能包含查询参数或片段")
 
-    base = f"{parsed.scheme}://{parsed.netloc}"
+    base = validate_service_origin(
+        f"{parsed.scheme}://{parsed.netloc}",
+        field_name="Bark server",
+        allow_http=allow_insecure_http,
+    )
     path = (parsed.path or "").strip("/")
     # 允许 .../push 误填，尽量剥掉末尾 push
     if path.endswith("/push"):
@@ -121,7 +129,6 @@ def _send_bark_post(server: str, device_key: str, title: str, content: str) -> t
         "group": "ashare-kimi3",
     }
     resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
-    text = (resp.text or "").strip()
     ok = 200 <= resp.status_code < 300
     # Bark 成功一般是 {"code":200,...}
     try:
@@ -129,10 +136,11 @@ def _send_bark_post(server: str, device_key: str, title: str, content: str) -> t
         code = data.get("code")
         if code is not None:
             ok = int(code) == 200
-        msg = data.get("message") or text
+        msg = str(data.get("message") or "").replace("\r", " ").replace("\n", " ")[:120]
     except Exception:
-        msg = text or f"HTTP {resp.status_code}"
-    return ok, f"POST {resp.status_code} {msg}"
+        msg = ""
+    detail = f"POST {resp.status_code}"
+    return ok, f"{detail} {msg}".rstrip()
 
 
 def _send_bark_get(server: str, device_key: str, title: str, content: str) -> tuple[bool, str]:
@@ -141,17 +149,17 @@ def _send_bark_get(server: str, device_key: str, title: str, content: str) -> tu
     if len(url) > 1800:
         return False, f"GET URL 过长({len(url)}), 已跳过"
     resp = requests.get(url, timeout=REQUEST_TIMEOUT)
-    text = (resp.text or "").strip()
     ok = 200 <= resp.status_code < 300
     try:
         data = resp.json()
         code = data.get("code")
         if code is not None:
             ok = int(code) == 200
-        msg = data.get("message") or text
+        msg = str(data.get("message") or "").replace("\r", " ").replace("\n", " ")[:120]
     except Exception:
-        msg = text or f"HTTP {resp.status_code}"
-    return ok, f"GET {resp.status_code} {msg}"
+        msg = ""
+    detail = f"GET {resp.status_code}"
+    return ok, f"{detail} {msg}".rstrip()
 
 
 def send(title: str, content: str) -> bool:
@@ -162,10 +170,29 @@ def send(title: str, content: str) -> bool:
         print('示例: notify=xxxxxxxx 或 notify={"bark":"xxxxxxxx"}')
         return False
 
-    server, device_key = _normalize_bark_target(bark_raw)
-    if not device_key:
-        print(f"推送配置无效，无法解析 device_key: {bark_raw[:80]}")
+    try:
+        allow_insecure_http = parse_bool(
+            get_env("BARK_ALLOW_INSECURE_HTTP", required=False),
+            default=False,
+            field_name="BARK_ALLOW_INSECURE_HTTP",
+        )
+        allow_get = parse_bool(
+            get_env("BARK_ALLOW_GET", required=False),
+            default=False,
+            field_name="BARK_ALLOW_GET",
+        )
+        server, device_key = _normalize_bark_target(
+            bark_raw,
+            allow_insecure_http=allow_insecure_http,
+        )
+    except ValueError as exc:
+        print(f"推送配置无效（内容已隐藏，{len(bark_raw)} 字符）: {exc}")
         return False
+    if not device_key:
+        print(f"推送配置无效，无法解析 device_key（内容已隐藏，{len(bark_raw)} 字符）")
+        return False
+    if server.startswith("http://"):
+        print("警告: Bark 正通过显式允许的明文 HTTP 发送")
 
     # 脱敏日志
     masked = device_key if len(device_key) <= 8 else f"{device_key[:4]}***{device_key[-4:]}"
@@ -176,7 +203,10 @@ def send(title: str, content: str) -> bool:
         if ok:
             print(f"Bark 推送成功: {detail}")
             return True
-        print(f"Bark POST 失败: {detail}，尝试 GET 后备…")
+        if not allow_get:
+            print(f"Bark POST 失败: {detail}；GET 后备默认禁用")
+            return False
+        print(f"Bark POST 失败: {detail}，尝试显式启用的 GET 后备…")
         ok2, detail2 = _send_bark_get(server, device_key, title, content)
         if ok2:
             print(f"Bark GET 推送成功: {detail2}")
@@ -184,7 +214,7 @@ def send(title: str, content: str) -> bool:
         print(f"Bark 推送失败: {detail2}")
         return False
     except requests.RequestException as exc:
-        print(f"Bark 推送网络异常: {exc}")
+        print(f"Bark 推送网络异常: {exc.__class__.__name__}")
         return False
     except Exception as exc:
         print(f"Bark 推送异常: {exc}")

@@ -47,6 +47,34 @@ class LoadAccountsTests(unittest.TestCase):
             common.load_accounts("demo.py")
 
 
+class SecurityConfigTests(unittest.TestCase):
+    def test_parse_bool_does_not_treat_false_string_as_true(self):
+        self.assertFalse(common.parse_bool("false", default=True, field_name="flag"))
+        self.assertTrue(common.parse_bool("yes", default=False, field_name="flag"))
+        with self.assertRaises(common.ConfigError):
+            common.parse_bool("sometimes", default=False, field_name="flag")
+
+    def test_service_origin_is_https_and_contains_no_credentials_or_path(self):
+        self.assertEqual(
+            common.validate_service_origin("https://api.example:8443/"),
+            "https://api.example:8443",
+        )
+        for value in (
+            "http://api.example",
+            "https://user:secret@api.example",
+            "https://api.example/rest/v1",
+            "https://api.example?redirect=evil",
+        ):
+            with self.subTest(value=value), self.assertRaises(common.ConfigError):
+                common.validate_service_origin(value)
+
+    def test_plain_http_requires_an_explicit_call_site_opt_in(self):
+        self.assertEqual(
+            common.validate_service_origin("http://ap.local", allow_http=True),
+            "http://ap.local",
+        )
+
+
 class RunnerTests(unittest.TestCase):
     def test_false_result_is_failure(self):
         class Script:

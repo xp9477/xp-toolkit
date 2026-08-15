@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 ROOT_DIR = Path(__file__).resolve().parent
 SCRIPT_SUFFIXES = {".py", ".js", ".sh"}
@@ -26,6 +27,53 @@ TEMP_SUFFIXES = {".swap", ".tmp", ".bak"}
 
 class ConfigError(ValueError):
     """配置或入口初始化错误。"""
+
+
+def parse_bool(value: Any, *, default: bool, field_name: str) -> bool:
+    """严格解析配置布尔值，避免字符串 ``"false"`` 被当成真值。"""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ConfigError(f"{field_name} 必须为布尔值")
+
+
+def validate_service_origin(
+    value: Any,
+    *,
+    field_name: str = "url",
+    allow_http: bool = False,
+) -> str:
+    """校验并规范化携带凭据的服务根地址。"""
+    raw = str(value or "").strip()
+    if not raw:
+        raise ConfigError(f"缺少 {field_name}")
+    if any(character.isspace() for character in raw):
+        raise ConfigError(f"{field_name} 不能包含空白字符")
+
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+        raise ConfigError(f"{field_name} 必须是有效的 HTTP(S) 根地址")
+    if parsed.username is not None or parsed.password is not None:
+        raise ConfigError(f"{field_name} 不能包含用户名或密码")
+    if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+        raise ConfigError(f"{field_name} 只能包含 scheme、主机和端口")
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise ConfigError(f"{field_name} 端口无效") from exc
+    if parsed.scheme != "https" and not allow_http:
+        raise ConfigError(f"{field_name} 必须使用 HTTPS")
+
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
 
 
 @dataclass
