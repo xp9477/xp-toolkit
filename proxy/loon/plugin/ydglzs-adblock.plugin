@@ -1,13 +1,12 @@
 #!name=云顶攻略助手去广告
 #!desc=通过伪装VIP会员状态实现免广告。
-#!homepage=https://github.com/xp9477/Rules
+#!homepage=https://github.com/xp9477/xp-toolkit
 #!author=xp9477
-#!icon=https://github.com/xp9477/Rules/raw/main/Loon/icon/ydglzs.png
 
 [Script]
 
 # 拦截主配置接口 - 伪装VIP状态
-http-response ^https?:\/\/jcc\.tftplay\.com\/config\/info script-path=https://github.com/xp9477/Rules/raw/main/Loon/script/tftplay-vip.js, requires-body=true, timeout=10
+http-response ^https?:\/\/jcc\.tftplay\.com\/config\/info(?:\/|\?|$) script-path=https://raw.githubusercontent.com/xp9477/xp-toolkit/main/proxy/loon/script/tftplay-vip.js, requires-body=true, timeout=10
 
 [MITM]
 hostname = jcc.tftplay.com
