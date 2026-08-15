@@ -6,11 +6,11 @@ env:
 - `birthday_notifier`: 每行一个 JSON 对象，字段 `name`, `notify_type`, `month`, `day`, `year`
 """
 
-from datetime import datetime
+from datetime import datetime, time
 
 import notify
 from common import load_accounts, run_single_script
-from zhdate import ZhDate
+from lunardate import LunarDate
 
 DEFAULT_TARGET_INTERVALS = [0, 1, 3, 5]
 
@@ -36,14 +36,18 @@ def check_birthdays():
         m, d, y = person["month"], person["day"], person.get("year")
 
         potential_dates = []
+        display_month, display_day = m, d
         if n_type == "lunar":
             if y:
-                birth_lunar = ZhDate.from_datetime(datetime(y, m, d))
-                l_m, l_d = birth_lunar.lunar_month, birth_lunar.lunar_day
+                birth_lunar = LunarDate.from_solar_date(y, m, d)
+                display_month, display_day = birth_lunar.month, birth_lunar.day
                 for check_year in [today.year - 1, today.year, today.year + 1]:
                     try:
-                        potential_dates.append(ZhDate(check_year, l_m, l_d).to_datetime())
-                    except Exception:
+                        solar_date = LunarDate(
+                            check_year, display_month, display_day
+                        ).to_solar_date()
+                        potential_dates.append(datetime.combine(solar_date, time.min))
+                    except ValueError:
                         continue
             else:
                 continue
@@ -71,10 +75,16 @@ def check_birthdays():
 
             if diff == 0:
                 title = f"🎂 {name} 生日快乐！"
-                message = f"今天（{m}月{d}日{type_label}）是 {name}{age_str} 的生日！"
+                message = (
+                    f"今天（{display_month}月{display_day}日{type_label}）"
+                    f"是 {name}{age_str} 的生日！"
+                )
             else:
                 title = f"🎁 生日预告：{diff}天后"
-                message = f"{name}{age_str} 的生日快到啦！日期：{m}月{d}日{type_label}"
+                message = (
+                    f"{name}{age_str} 的生日快到啦！"
+                    f"日期：{display_month}月{display_day}日{type_label}"
+                )
 
             send_notification(title, message)
             print(f"  >>> 已发送推送通知 ({diff}天后)")

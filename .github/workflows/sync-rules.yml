@@ -1,57 +1,77 @@
-﻿name: Sync Rules
+name: Sync Rules
 
 on:
   push:
-    paths:
-      - 'proxy/loon/Self-Direct.list'
-      - 'proxy/loon/Self-Proxy.list'
-      - 'proxy/clash/Self-Direct.yaml'
-      - 'proxy/clash/Self-Proxy.yaml'
-      - 'proxy/quanx/Self-Direct.list'
-      - 'proxy/quanx/Self-Proxy.list'
     branches:
       - main
+    paths:
+      - "proxy/loon/Self-Direct.list"
+      - "proxy/loon/Self-Proxy.list"
+      - "proxy/clash/Self-Direct.yaml"
+      - "proxy/clash/Self-Proxy.yaml"
+      - "proxy/quanx/Self-Direct.list"
+      - "proxy/quanx/Self-Proxy.list"
+
+concurrency:
+  group: sync-rules-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
-    # 跳过 bot 自身的提交，防止循环触发
     if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: '3.x'
+          python-version: "3.12"
 
-      - name: Detect changed rule files
-        id: changed
+      - name: Sync every changed rule source
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        shell: bash
         run: |
-          FILES=$(git diff --name-only HEAD~1 HEAD -- \
-            'proxy/loon/Self-Direct.list' \
-            'proxy/loon/Self-Proxy.list' \
-            'proxy/clash/Self-Direct.yaml' \
-            'proxy/clash/Self-Proxy.yaml' \
-            'proxy/quanx/Self-Direct.list' \
-            'proxy/quanx/Self-Proxy.list' | tr '\n' ' ')
-          echo "files=$FILES" >> "$GITHUB_OUTPUT"
-          echo "changed files: $FILES"
+          set -euo pipefail
+          rule_paths=(
+            proxy/loon/Self-Direct.list
+            proxy/loon/Self-Proxy.list
+            proxy/clash/Self-Direct.yaml
+            proxy/clash/Self-Proxy.yaml
+            proxy/quanx/Self-Direct.list
+            proxy/quanx/Self-Proxy.list
+          )
+          if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$AFTER_SHA" -- "${rule_paths[@]}")
+          else
+            mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" -- "${rule_paths[@]}")
+          fi
+          if (( ${#changed[@]} == 0 )); then
+            echo "No rule source changed"
+            exit 0
+          fi
+          python .github/scripts/sync_rules.py "${changed[@]}"
+          python .github/scripts/check_rules.py --offline
 
-      - name: Sync rules
-        run: python .github/scripts/sync_rules.py ${{ steps.changed.outputs.files }}
-
-      - name: Check rules
-        run: python .github/scripts/check_rules.py --offline
-
-      - name: Commit and push changes
+      - name: Commit generated rules
+        shell: bash
         run: |
+          set -euo pipefail
+          git add proxy/loon/ proxy/clash/ proxy/quanx/
+          if git diff --staged --quiet; then
+            echo "Generated rules already match"
+            exit 0
+          fi
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add proxy/loon/ proxy/clash/ proxy/quanx/
-          git diff --staged --quiet || git commit -m "chore: sync rules [skip ci]" && git push
-
+          git commit -m "chore(proxy): sync generated rules"
+          git pull --rebase origin main
+          git push origin HEAD:main
