@@ -1,10 +1,19 @@
 """
 name: qBittorrent 删除非 CHDBits HR 种子
 cron: 0 * * * *
-description: 删除已整理标签中不包含 chdbits tracker 的种子
+description: 检查已整理标签中不包含 CHDBits tracker 的种子，默认仅预览
 
 env:
-- `qb_delete_nonHR`: JSON 对象或 JSON 数组，字段 `url`, `api_key` (可选: `cookiecloud_url`, `cookiecloud_uuid`, `cookiecloud_password`, `chdbits_userid`)
+- `qb_delete_nonHR`: JSON 对象或 JSON 数组，必填 `url`, `api_key`
+- 默认 `dry_run=true` 且 `delete_files=false`；真正删除需显式设置 `dry_run=false`
+- 删除下载文件还必须额外设置 `delete_files_confirmation="DELETE_FILES"`
+- 每个允许删除下载文件的种子还必须带 `允许删除文件` 标签
+- 默认 `verify_tls=true`；仅 qBittorrent 使用自签名证书时显式关闭
+- CookieCloud 默认也要求 HTTPS；无法迁移的旧服务需显式设置
+  `cookiecloud_allow_insecure_http=true`
+- 可选: `delete_files`, `verify_tls`, `chdbits_tracker_hosts`,
+  `cookiecloud_allow_insecure_http`, `cookiecloud_url`, `cookiecloud_uuid`,
+  `cookiecloud_password`, `chdbits_userid`
 """
 
 import base64
@@ -13,120 +22,264 @@ import json
 import os
 import re
 from datetime import datetime
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 import notify
-from common import require_fields, run_account_scripts
+from common import (
+    parse_bool,
+    require_fields,
+    run_account_scripts,
+    validate_service_origin,
+)
+
+DEFAULT_CHDBITS_TRACKER_HOSTS = frozenset({"ptchdbits.co", "tracker.ptchdbits.co"})
+VALID_TRACKER_SCHEMES = frozenset({"http", "https", "udp"})
+VALID_TORRENT_HASH = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z")
+FILE_DELETE_APPROVAL_TAG = "允许删除文件"
 
 
-def get_cookiecloud_cookies(url, uuid, password, target_domain="ptchdbits.co"):
+def normalize_hostname(value):
+    """将主机名规范化为可做精确比较的 ASCII 形式。"""
+    if not isinstance(value, str):
+        raise ValueError("tracker 主机名必须是字符串")
+    hostname = value.strip().rstrip(".").lower()
+    if not hostname or any(char in hostname for char in "/:@"):
+        raise ValueError(f"无效的 tracker 主机名: {value!r}")
     try:
-        req_url = f"{url.rstrip('/')}/get/{uuid}"
-        # 发送包含 password 参数，部分服务端会自动解密，如果未自动解密则本地解密
-        response = httpx.get(req_url, params={"password": password}, timeout=30)
+        hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise ValueError(f"无效的 tracker 主机名: {value!r}") from exc
+    if ".." in hostname or not re.fullmatch(
+        r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", hostname
+    ):
+        raise ValueError(f"无效的 tracker 主机名: {value!r}")
+    return hostname
+
+
+def parse_tracker_hosts(value):
+    """读取精确 tracker allowlist，兼容逗号分隔字符串和字符串数组。"""
+    if value is None:
+        return DEFAULT_CHDBITS_TRACKER_HOSTS
+    if isinstance(value, str):
+        values = value.split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        values = value
+    else:
+        raise ValueError("chdbits_tracker_hosts 必须是字符串或字符串数组")
+
+    hosts = frozenset(normalize_hostname(item) for item in values if str(item).strip())
+    if not hosts:
+        raise ValueError("chdbits_tracker_hosts 不能为空")
+    return hosts
+
+
+def tracker_hostname(url):
+    """仅从受支持的 tracker URL 中提取主机名。"""
+    if not isinstance(url, str):
+        return None
+    try:
+        parsed = urlsplit(url.strip())
+        if parsed.scheme.lower() not in VALID_TRACKER_SCHEMES or not parsed.hostname:
+            return None
+        return normalize_hostname(parsed.hostname)
+    except (ValueError, UnicodeError):
+        return None
+
+
+def tracker_hostnames(trackers):
+    """返回可验证的 tracker 主机名集合。"""
+    return {
+        hostname
+        for tracker in trackers
+        if (hostname := tracker_hostname(tracker.get("url"))) is not None
+    }
+
+
+def normalize_torrent_name(value):
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[\W_]+", "", value).lower()
+
+
+def parse_chdbits_torrents(page_html):
+    """解析 CHDBits 做种页；结构不匹配时返回 None，而不是空列表。"""
+    if not isinstance(page_html, str) or not page_html.strip():
+        return None
+
+    torrents = []
+    for chunk in re.split(r"(?i)<tr", page_html):
+        if "details.php?id=" not in chunk:
+            continue
+        # 匹配详情链接的 title，避免读到分类图片的 title。
+        title_match = re.search(
+            r'href="details\.php[^>]+title="([^"]+)"',
+            chunk,
+            re.IGNORECASE,
+        )
+        if not title_match:
+            title_match = re.search(
+                r'href="details\.php[^>]+>(?:<b>)?([^<]+)(?:</b>)?</a>',
+                chunk,
+                re.IGNORECASE,
+            )
+        if not title_match:
+            continue
+
+        html_title = title_match.group(1)
+        html_title_clean = normalize_torrent_name(html_title)
+        if not html_title_clean:
+            continue
+        has_hr = (
+            'class="circle-text">HR<' in chunk
+            or 'class="circle">HR<' in chunk
+            or ">HR</div>" in chunk
+        )
+        torrents.append((html_title_clean, has_hr, html_title))
+
+    return torrents or None
+
+
+def find_unique_torrent_match(name, candidates):
+    """
+    返回唯一的 CHDBits 名称匹配。
+
+    仅接受去标点、大小写归一化后的唯一精确匹配。包含关系即使只有一个候选，
+    也不足以作为自动删除证据。
+    """
+    normalized_name = normalize_torrent_name(name)
+    if len(normalized_name) <= 5:
+        return None, "invalid"
+
+    exact_matches = [item for item in candidates if item[0] == normalized_name]
+    if len(exact_matches) == 1:
+        return exact_matches[0], "matched"
+    if len(exact_matches) > 1:
+        return None, "ambiguous"
+
+    return None, "not_found"
+
+
+def validate_cookiecloud_base_url(value, *, allow_http=False):
+    """校验 CookieCloud 根地址；允许官方 API_ROOT 子路径。"""
+    raw = str(value or "").strip().rstrip("/")
+    if not raw or any(character.isspace() for character in raw):
+        raise ValueError("CookieCloud URL 无效")
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+        raise ValueError("CookieCloud URL 必须是有效的 HTTP(S) 地址")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("CookieCloud URL 不能包含用户名或密码")
+    if parsed.query or parsed.fragment:
+        raise ValueError("CookieCloud URL 不能包含查询参数或片段")
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("CookieCloud URL 端口无效") from exc
+    if parsed.scheme != "https" and not allow_http:
+        raise ValueError("CookieCloud URL 必须使用 HTTPS")
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
+
+
+def _decrypt_cookiecloud_payload(encrypted_data_b64, uuid, password):
+    """使用唯一声明的 cryptography 实现解密 CookieCloud 数据。"""
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    key = hashlib.md5(f"{uuid}-{password}".encode()).hexdigest()[:16].encode()
+    encrypted_data = base64.b64decode(encrypted_data_b64, validate=True)
+
+    def decrypt_aes_cbc(aes_key, iv, data):
+        cipher = Cipher(algorithms.AES(aes_key), modes.CBC(iv))
+        decryptor = cipher.decryptor()
+        padded_data = decryptor.update(data) + decryptor.finalize()
+        unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+        return unpadder.update(padded_data) + unpadder.finalize()
+
+    if encrypted_data.startswith(b"Salted__"):
+        salt = encrypted_data[8:16]
+        ciphertext = encrypted_data[16:]
+        key_iv = b""
+        previous = b""
+        while len(key_iv) < 48:
+            previous = hashlib.md5(previous + key + salt).digest()
+            key_iv += previous
+        decrypted_data = decrypt_aes_cbc(key_iv[:32], key_iv[32:48], ciphertext)
+    else:
+        decrypted_data = decrypt_aes_cbc(key, b"\x00" * 16, encrypted_data)
+
+    decoded = json.loads(decrypted_data.decode("utf-8"))
+    if not isinstance(decoded, dict):
+        raise ValueError("CookieCloud 解密结果必须是对象")
+    return decoded
+
+
+def get_cookiecloud_cookies(
+    url,
+    uuid,
+    password,
+    target_domain="ptchdbits.co",
+    *,
+    allow_insecure_http=False,
+):
+    try:
+        base_url = validate_cookiecloud_base_url(
+            url,
+            allow_http=allow_insecure_http,
+        )
+        if not isinstance(uuid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{6,128}", uuid):
+            raise ValueError("CookieCloud UUID 格式无效")
+        req_url = f"{base_url}/get/{quote(uuid, safe='')}"
+        # 官方服务端在无 password 请求体时返回密文；密码只在本地参与解密，绝不进入 URL。
+        response = httpx.get(req_url, timeout=30, follow_redirects=False)
         if response.status_code != 200:
             print(f"❌ 请求 CookieCloud 失败，状态码: {response.status_code}")
             return None
-        
-        data = response.json()
-        
-        # 提取 cookie 列表
-        cookie_list = []
-        if "encrypted" in data:
-            encrypted_data_b64 = data["encrypted"]
-            hash_str = hashlib.md5(f"{uuid}-{password}".encode()).hexdigest()
-            key = hash_str[:16].encode()
-            encrypted_data = base64.b64decode(encrypted_data_b64)
-            
-            decrypted_data = None
-            
-            # Helper function to try different decryption libraries
-            def decrypt_aes_cbc(key, iv, data):
-                # 1. 尝试 cryptography (青龙通常内置)
-                try:
-                    from cryptography.hazmat.backends import default_backend
-                    from cryptography.hazmat.primitives import padding
-                    from cryptography.hazmat.primitives.ciphers import (
-                        Cipher,
-                        algorithms,
-                        modes,
-                    )
-                    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-                    decryptor = cipher.decryptor()
-                    padded_data = decryptor.update(data) + decryptor.finalize()
-                    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
-                    return unpadder.update(padded_data) + unpadder.finalize()
-                except ImportError:
-                    pass
-                
-                # 2. 尝试 pyaes (纯 Python 库)
-                try:
-                    import pyaes
-                    decrypter = pyaes.Decrypter(pyaes.AESModeOfOperationCBC(key, iv=iv))
-                    decrypted = decrypter.feed(data)
-                    decrypted += decrypter.feed()
-                    return decrypted
-                except ImportError:
-                    pass
-                
-                # 3. 尝试 pycryptodome
-                try:
-                    from Crypto.Cipher import AES
-                    from Crypto.Util.Padding import unpad
-                    cipher = AES.new(key, AES.MODE_CBC, iv=iv)
-                    return unpad(cipher.decrypt(data), AES.block_size)
-                except ImportError:
-                    pass
-                
-                raise RuntimeError("未找到任何可用的 AES 库，请安装 cryptography 或 pyaes")
 
-            try:
-                if encrypted_data.startswith(b"Salted__"):
-                    # 尝试 CryptoJS (动态IV / Salted__) 格式
-                    salt = encrypted_data[8:16]
-                    ciphertext = encrypted_data[16:]
-                    
-                    key_iv = b""
-                    prev = b""
-                    while len(key_iv) < 48:
-                        prev = hashlib.md5(prev + key + salt).digest()
-                        key_iv += prev
-                    
-                    real_key = key_iv[:32]
-                    real_iv = key_iv[32:48]
-                    
-                    decrypted_data = decrypt_aes_cbc(real_key, real_iv, ciphertext)
-                else:
-                    # 尝试标准固定 IV
-                    try:
-                        decrypted_data = decrypt_aes_cbc(key, b'\x00' * 16, encrypted_data)
-                    except Exception:
-                        # 尝试前 16 字节作为 IV
-                        iv = encrypted_data[:16]
-                        decrypted_data = decrypt_aes_cbc(key, iv, encrypted_data[16:])
-                        
-                json_data = json.loads(decrypted_data.decode('utf-8'))
-            except Exception as e:
-                print(f"❌ 解密 CookieCloud 数据失败: {e}")
-                return None
-                    
-            cookie_list = json_data.get("cookie_data", [])
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("CookieCloud 响应必须是对象")
+
+        if "encrypted" in data:
+            cookie_list = _decrypt_cookiecloud_payload(
+                data["encrypted"],
+                uuid,
+                password,
+            ).get("cookie_data", [])
         elif "cookie_data" in data:
             cookie_list = data["cookie_data"]
         else:
             print("❌ CookieCloud 响应缺少 cookie_data 字段")
             return None
-            
+
         cookies_dict = {}
+        target = normalize_hostname(target_domain)
+
+        def add_cookie(cookie, domain):
+            if not isinstance(cookie, dict) or not isinstance(domain, str):
+                return
+            try:
+                cookie_domain = normalize_hostname(domain.lstrip("."))
+            except ValueError:
+                return
+            if cookie_domain != target:
+                return
+            name = cookie.get("name")
+            value = cookie.get("value")
+            if isinstance(name, str) and name and isinstance(value, str):
+                cookies_dict[name] = value
+
         if isinstance(cookie_list, dict):
             for domain, cookies in cookie_list.items():
-                if target_domain in domain:
+                if isinstance(cookies, list):
                     for c in cookies:
-                        cookies_dict[c['name']] = c['value']
-        else:
+                        add_cookie(c, domain)
+        elif isinstance(cookie_list, list):
             for c in cookie_list:
-                if target_domain in c.get('domain', ''):
-                    cookies_dict[c['name']] = c['value']
+                if isinstance(c, dict):
+                    add_cookie(c, c.get("domain", ""))
+        else:
+            raise ValueError("cookie_data 必须是对象或数组")
         return cookies_dict
     except Exception as e:
         print(f"❌ 获取 CookieCloud 异常: {e}")
@@ -134,20 +287,20 @@ def get_cookiecloud_cookies(url, uuid, password, target_domain="ptchdbits.co"):
 
 
 class QBittorrentClient:
-    def __init__(self, base_url, api_key):
-        self.base_url = base_url.rstrip('/')
+    def __init__(self, base_url, api_key, *, verify_tls=True):
+        self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.session = httpx.Client(
             base_url=self.base_url,
-            verify=False,
+            verify=verify_tls,
             timeout=30,
-            headers={'Authorization': f'Bearer {self.api_key}'}
+            headers={"Authorization": f"Bearer {self.api_key}"},
         )
 
     def login(self):
         """验证 API Key 是否有效"""
         try:
-            response = self.session.get('/api/v2/app/version')
+            response = self.session.get("/api/v2/app/version")
             if response.status_code == 200:
                 print("✅ API Key 验证成功")
                 return True
@@ -159,41 +312,60 @@ class QBittorrentClient:
             return False
 
     def get_torrents(self):
-        """获取种子列表"""
+        """获取种子列表；请求或解析失败时返回 None。"""
         try:
-            response = self.session.get('/api/v2/torrents/info')
-            return response.json()
+            response = self.session.get("/api/v2/torrents/info")
+            response.raise_for_status()
+            torrents = response.json()
+            if not isinstance(torrents, list) or not all(
+                isinstance(item, dict) for item in torrents
+            ):
+                raise ValueError("种子 API 响应必须是对象数组")
+            return torrents
         except Exception as e:
             print(f"❌ 获取种子列表失败: {e}")
-            return []
+            return None
 
     def get_torrent_trackers(self, hash_value):
-        """获取种子的 tracker 列表"""
+        """获取种子的 tracker 列表；请求或解析失败时返回 None。"""
         try:
-            response = self.session.get('/api/v2/torrents/trackers', params={'hash': hash_value})
-            return response.json()
+            response = self.session.get(
+                "/api/v2/torrents/trackers", params={"hash": hash_value}
+            )
+            response.raise_for_status()
+            trackers = response.json()
+            if not isinstance(trackers, list) or not all(
+                isinstance(item, dict) and isinstance(item.get("url"), str)
+                for item in trackers
+            ):
+                raise ValueError("tracker API 响应必须是带 url 的对象数组")
+            return trackers
         except Exception as e:
             print(f"❌ 获取种子 {hash_value} 的 tracker 失败: {e}")
-            return []
+            return None
 
-    def delete_torrent(self, hash_value):
-        """删除种子及其下载的文件"""
+    def delete_torrent(self, hash_value, *, delete_files=False):
+        """删除种子；默认保留已下载文件。"""
+        if not isinstance(hash_value, str) or not VALID_TORRENT_HASH.fullmatch(
+            hash_value
+        ):
+            print("❌ 拒绝删除：种子哈希格式无效")
+            return False
         try:
             # 使用 data 发送 POST 请求
             data = {
-                'hashes': hash_value,
-                'deleteFiles': 'true'
+                "hashes": hash_value,
+                "deleteFiles": "true" if delete_files else "false",
             }
-            response = self.session.post('/api/v2/torrents/delete', data=data)
+            response = self.session.post("/api/v2/torrents/delete", data=data)
             print(f"🔍 删除响应状态: {response.status_code}")
-            print(f"🔍 删除响应内容: '{response.text}'")
-            
+
             # qBittorrent API 成功时通常返回空响应或 'Ok.'
             if response.status_code == 200:
-                if response.text == '' or response.text == 'Ok.':
+                if response.text.strip() in {"", "Ok."}:
                     return True
                 else:
-                    print(f"⚠️  删除响应内容异常: '{response.text}'")
+                    print("⚠️  删除响应内容异常")
                     return False
             else:
                 print(f"❌ 删除请求失败，状态码: {response.status_code}")
@@ -210,230 +382,313 @@ class QBittorrentClient:
 
 class Script:
     """脚本类"""
-    
+
     def __init__(self, account):
         self.account = account
-        self.url = account.get("url", "")
-        self.api_key = account.get("api_key", "")
         require_fields(account, "url", "api_key")
+        self.dry_run = parse_bool(
+            account.get("dry_run", account.get("dryRun")),
+            default=True,
+            field_name="dry_run",
+        )
+        self.delete_files = parse_bool(
+            account.get("delete_files", account.get("deleteFiles")),
+            default=False,
+            field_name="delete_files",
+        )
+        if (
+            self.delete_files
+            and account.get("delete_files_confirmation") != "DELETE_FILES"
+        ):
+            raise ValueError(
+                'delete_files=true 时必须同时设置 delete_files_confirmation="DELETE_FILES"'
+            )
+        self.verify_tls = parse_bool(
+            account.get("verify_tls"),
+            default=True,
+            field_name="verify_tls",
+        )
+        self.cookiecloud_allow_insecure_http = parse_bool(
+            account.get("cookiecloud_allow_insecure_http"),
+            default=False,
+            field_name="cookiecloud_allow_insecure_http",
+        )
+        self.url = validate_service_origin(
+            account.get("url"),
+            field_name="url",
+            allow_http=not self.verify_tls,
+        )
+        self.api_key = account.get("api_key")
+        if not isinstance(self.api_key, str) or not self.api_key.strip():
+            raise ValueError("api_key 必须是非空字符串")
+        self.allowed_tracker_hosts = parse_tracker_hosts(
+            account.get("chdbits_tracker_hosts")
+        )
         self.client = None
-    
+
+    def delete_candidate(self, hash_value, name, tags=()):
+        """只有显式关闭 dry-run 后才会发送删除请求。"""
+        if self.delete_files and FILE_DELETE_APPROVAL_TAG not in tags:
+            print(
+                f"🛑 已阻止删除 {name}：删除下载文件还需要种子标签 "
+                f"{FILE_DELETE_APPROVAL_TAG!r}"
+            )
+            return "blocked"
+
+        if self.dry_run:
+            file_action = "删除文件" if self.delete_files else "保留文件"
+            print(f"🧪 [dry-run] 将删除种子（{file_action}）: {name}")
+            return "planned"
+
+        assert self.client is not None
+        if self.client.delete_torrent(hash_value, delete_files=self.delete_files):
+            print(f"✅ 已删除种子: {name}")
+            return "deleted"
+        print(f"❌ 删除种子失败: {name}")
+        return "failed"
+
     def get_chdbits_userdetails(self, userid, cookies_dict):
         # NexusPHP 的正在做种列表通常通过 AJAX 异步加载，直接访问 userdetails.php 获取不到列表HTML
         url = f"https://ptchdbits.co/getusertorrentlistajax.php?userid={userid}&type=seeding"
         try:
-            response = httpx.get(url, cookies=cookies_dict, timeout=30, verify=False)
+            response = httpx.get(url, cookies=cookies_dict, timeout=30)
             if response.status_code == 200:
                 return response.text
             else:
-                print(f"❌ 访问 CHDBits userdetails 失败, 状态码: {response.status_code}")
+                print(
+                    f"❌ 访问 CHDBits userdetails 失败, 状态码: {response.status_code}"
+                )
                 return None
         except Exception as e:
             print(f"❌ 访问 CHDBits 异常: {e}")
             return None
-    
+
     def run(self):
         """执行脚本逻辑"""
         print("🚀 开始执行 qBittorrent 种子清理任务")
         print(f"📅 执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
+        if not self.verify_tls:
+            print("⚠️  已显式关闭 qBittorrent TLS 校验，API Key 可能暴露")
+
         # 创建客户端
-        self.client = QBittorrentClient(self.url, self.api_key)
-        
-        cookiecloud_url = os.environ.get("cookiecloud_url") or self.account.get("cookiecloud_url")
-        cookiecloud_uuid = os.environ.get("cookiecloud_uuid") or self.account.get("cookiecloud_uuid")
-        cookiecloud_password = os.environ.get("cookiecloud_password") or self.account.get("cookiecloud_password")
-        chdbits_userid = os.environ.get("chdbits_userid") or self.account.get("chdbits_userid")
-        
+        self.client = QBittorrentClient(
+            self.url,
+            self.api_key,
+            verify_tls=self.verify_tls,
+        )
+
+        cookiecloud_url = os.environ.get("cookiecloud_url") or self.account.get(
+            "cookiecloud_url"
+        )
+        cookiecloud_uuid = os.environ.get("cookiecloud_uuid") or self.account.get(
+            "cookiecloud_uuid"
+        )
+        cookiecloud_password = os.environ.get(
+            "cookiecloud_password"
+        ) or self.account.get("cookiecloud_password")
+        chdbits_userid = os.environ.get("chdbits_userid") or self.account.get(
+            "chdbits_userid"
+        )
+
         chdbits_html = None
         chdbits_cookies = None
         cookiecloud_failed = False
         chdbits_parsed_torrents = None
-        
+        chdbits_parse_failed = False
+        inspection_failed = False
+
         try:
             # 登录
             if not self.client.login():
                 print("❌ 登录失败，任务终止")
                 return False
-            
+
             # 获取种子列表
             print("📥 正在获取种子列表...")
             torrents = self.client.get_torrents()
+            if torrents is None:
+                print("❌ 种子列表不可用，任务终止")
+                return False
             if not torrents:
                 print("✅ 当前没有种子，无需处理")
                 return True
-            
+
             print(f"📊 共找到 {len(torrents)} 个种子")
-            
+
             # 筛选符合条件的种子
             target_torrents = []
             for torrent in torrents:
                 # 检查标签是否包含"已整理"
-                tags = [tag.strip() for tag in torrent.get('tags', '').split(',')]
-                if '已整理' in tags:
+                tags_value = torrent.get("tags", "")
+                if not isinstance(tags_value, str):
+                    print("⚠️  种子标签格式无效，已跳过")
+                    inspection_failed = True
+                    continue
+                tags = [tag.strip() for tag in tags_value.split(",")]
+                if "已整理" in tags:
                     target_torrents.append(torrent)
             print(f"🎯 找到 {len(target_torrents)} 个标签含'已整理'的种子")
-            
+
             if not target_torrents:
                 print("✅ 没有需要处理的种子")
-                return True
-            
+                return not inspection_failed
+
             # 检查每个种子的 tracker 并删除不符合条件的
             deleted_count = 0
+            planned_count = 0
             deleted_torrents = []
-            
+
             for torrent in target_torrents:
-                hash_value = torrent['hash']
-                name = torrent['name']
-                
+                hash_value = torrent.get("hash")
+                name = torrent.get("name")
+                if (
+                    not isinstance(hash_value, str)
+                    or not VALID_TORRENT_HASH.fullmatch(hash_value)
+                    or not isinstance(name, str)
+                    or not name.strip()
+                ):
+                    print("⚠️  种子缺少有效的 hash/name，已跳过")
+                    inspection_failed = True
+                    continue
+
                 print(f"🔍 检查种子: {name}")
-                
+                torrent_tags = {
+                    tag.strip()
+                    for tag in torrent.get("tags", "").split(",")
+                    if tag.strip()
+                }
+
                 # 获取 tracker 列表
                 trackers = self.client.get_torrent_trackers(hash_value)
-                if not trackers:
-                    print(f"⚠️  无法获取种子 {name} 的 tracker 信息，跳过")
+                if trackers is None:
+                    print(f"⚠️  获取种子 {name} 的 tracker 失败，已保留")
+                    inspection_failed = True
                     continue
-                
-                # 检查是否包含 chdbits
-                has_chdbits = False
-                for tracker in trackers:
-                    url = tracker.get('url', '').lower()
-                    if 'chdbits' in url:
-                        has_chdbits = True
-                        break
-                
+                hosts = tracker_hostnames(trackers)
+                if not hosts:
+                    print(f"⚠️  种子 {name} 没有可验证的 tracker 主机名，已保留")
+                    inspection_failed = True
+                    continue
+
+                # 主机名必须与 allowlist 完全一致，不接受子串或查询参数伪装。
+                has_chdbits = bool(hosts & self.allowed_tracker_hosts)
+
                 if not has_chdbits:
-                    print(f"🗑️  种子 {name} 的 tracker 不包含 chdbits，准备删除")
+                    print(f"🗑️  种子 {name} 的 tracker 不在 CHDBits allowlist")
                     print(f"🔍 种子哈希: {hash_value}")
-                    if self.client.delete_torrent(hash_value):
+                    action = self.delete_candidate(hash_value, name, torrent_tags)
+                    if action == "deleted":
                         deleted_count += 1
                         deleted_torrents.append(name)
-                        print(f"✅ 已删除种子: {name}")
+                    elif action == "planned":
+                        planned_count += 1
                     else:
-                        print(f"❌ 删除种子失败: {name}")
-                        # 尝试强制删除（不删除文件）
-                        print("🔄 尝试强制删除种子（保留文件）...")
-                        try:
-                            force_data = {
-                                'hashes': hash_value,
-                                'deleteFiles': 'false'
-                            }
-                            force_response = self.client.session.post('/api/v2/torrents/delete', data=force_data)
-                            print(f"🔍 强制删除响应: {force_response.status_code} - '{force_response.text}'")
-                            
-                            if force_response.status_code == 200 and (force_response.text == '' or force_response.text == 'Ok.'):
-                                deleted_count += 1
-                                deleted_torrents.append(name)
-                                print(f"✅ 强制删除成功（保留文件）: {name}")
-                            else:
-                                print(f"❌ 强制删除也失败: {name}")
-                        except Exception as e:
-                            print(f"❌ 强制删除时出错: {e}")
+                        inspection_failed = True
                 else:
                     print(f"🔍 种子 {name} 包含 chdbits tracker，检查 HR 标签...")
                     if not chdbits_userid:
                         print("⚠️  未配置 chdbits_userid，跳过 HR 检查，保留种子")
                         continue
-                        
+
                     if chdbits_html is None:
-                        if not cookiecloud_url or not cookiecloud_uuid or not cookiecloud_password:
-                            print("⚠️  未配置 CookieCloud 信息，无法获取 Cookie，跳过 HR 检查，保留种子")
+                        if (
+                            not cookiecloud_url
+                            or not cookiecloud_uuid
+                            or not cookiecloud_password
+                        ):
+                            print(
+                                "⚠️  未配置 CookieCloud 信息，无法获取 Cookie，跳过 HR 检查，保留种子"
+                            )
                             continue
-                        
+
                         if chdbits_cookies is None and not cookiecloud_failed:
-                            print("📥 正在从 CookieCloud 获取 ptchdbits.co 的 Cookie...")
-                            chdbits_cookies = get_cookiecloud_cookies(cookiecloud_url, cookiecloud_uuid, cookiecloud_password)
+                            print(
+                                "📥 正在从 CookieCloud 获取 ptchdbits.co 的 Cookie..."
+                            )
+                            chdbits_cookies = get_cookiecloud_cookies(
+                                cookiecloud_url,
+                                cookiecloud_uuid,
+                                cookiecloud_password,
+                                allow_insecure_http=self.cookiecloud_allow_insecure_http,
+                            )
                             if not chdbits_cookies:
                                 cookiecloud_failed = True
-                        
+
                         if cookiecloud_failed or not chdbits_cookies:
                             print("⚠️  获取 CHDBits Cookie 失败，跳过 HR 检查，保留种子")
+                            inspection_failed = True
                             continue
-                            
+
                         print("📥 正在获取 CHDBits userdetails 页面...")
-                        chdbits_html = self.get_chdbits_userdetails(chdbits_userid, chdbits_cookies)
-                        
+                        chdbits_html = self.get_chdbits_userdetails(
+                            chdbits_userid, chdbits_cookies
+                        )
+
                     if not chdbits_html:
                         print("⚠️  无法获取 CHDBits userdetails，跳过 HR 检查，保留种子")
+                        inspection_failed = True
                         continue
-                        
+
+                    if chdbits_parse_failed:
+                        inspection_failed = True
+                        continue
                     if chdbits_parsed_torrents is None:
-                        chdbits_parsed_torrents = []
-                        chunks = re.split(r'(?i)<tr', chdbits_html)
-                        for chunk in chunks:
-                            if 'details.php?id=' in chunk:
-                                # 确保匹配的是包含详情链接的 a 标签中的 title，而不是前面的分类 img 的 title
-                                title_match = re.search(r'href="details\.php[^>]+title="([^"]+)"', chunk, re.IGNORECASE)
-                                if not title_match:
-                                    title_match = re.search(r'href="details\.php[^>]+>(?:<b>)?([^<]+)(?:</b>)?</a>', chunk, re.IGNORECASE)
-                                    
-                                if title_match:
-                                    html_title = title_match.group(1)
-                                    html_title_clean = re.sub(r'[\W_]+', '', html_title).lower()
-                                    has_hr = 'class="circle-text">HR<' in chunk or 'class="circle">HR<' in chunk or '>HR</div>' in chunk
-                                    chdbits_parsed_torrents.append((html_title_clean, has_hr, html_title))
-                        
-                        if not chdbits_parsed_torrents:
-                            print(f"🐛 警告: 网页解析失败，提取到 0 个做种记录！请检查网页结构。HTML前段: {chdbits_html[:300]}")
-                        else:
-                            print(f"🐛 从网页提取了 {len(chdbits_parsed_torrents)} 个正在做种的种子")
+                        chdbits_parsed_torrents = parse_chdbits_torrents(chdbits_html)
+                        if chdbits_parsed_torrents is None:
+                            print("🐛 警告: 网页解析失败，提取到 0 个做种记录")
+                            chdbits_parse_failed = True
+                            inspection_failed = True
+                            continue
+                        print(
+                            f"🐛 从网页提取了 {len(chdbits_parsed_torrents)} 个正在做种的种子"
+                        )
 
-                    qb_name_clean = re.sub(r'[\W_]+', '', name).lower()
-                    matched_hr = None
-                    matched_html_title = None
-                    
-                    for html_title_clean, has_hr, html_title in chdbits_parsed_torrents:
-                        if len(html_title_clean) > 5 and (html_title_clean in qb_name_clean or qb_name_clean in html_title_clean):
-                            matched_hr = has_hr
-                            matched_html_title = html_title
-                            break
-
-                    if matched_hr is not None:
-                        print(f"🔍 网页匹配成功: {matched_html_title} (HR: {matched_hr})")
-                        if matched_hr:
-                            print(f"✅ 种子 {name} 带有 HR 标签，保留")
+                    match, match_status = find_unique_torrent_match(
+                        name,
+                        chdbits_parsed_torrents,
+                    )
+                    if match is None:
+                        if match_status == "ambiguous":
+                            print(f"⚠️  种子名存在多个精确匹配，已保留: {name}")
                         else:
-                            print(f"🗑️  种子 {name} 没有 HR 标签，准备删除")
-                            print(f"🔍 种子哈希: {hash_value}")
-                            if self.client.delete_torrent(hash_value):
-                                deleted_count += 1
-                                deleted_torrents.append(name)
-                                print(f"✅ 已删除种子: {name}")
-                            else:
-                                print(f"❌ 删除种子失败: {name}")
-                                # 尝试强制删除（不删除文件）
-                                print("🔄 尝试强制删除种子（保留文件）...")
-                                try:
-                                    force_data = {
-                                        'hashes': hash_value,
-                                        'deleteFiles': 'false'
-                                    }
-                                    force_response = self.client.session.post('/api/v2/torrents/delete', data=force_data)
-                                    print(f"🔍 强制删除响应: {force_response.status_code} - '{force_response.text}'")
-                                    
-                                    if force_response.status_code == 200 and (force_response.text == '' or force_response.text == 'Ok.'):
-                                        deleted_count += 1
-                                        deleted_torrents.append(name)
-                                        print(f"✅ 强制删除成功（保留文件）: {name}")
-                                    else:
-                                        print(f"❌ 强制删除也失败: {name}")
-                                except Exception as e:
-                                    print(f"❌ 强制删除时出错: {e}")
+                            print(
+                                f"⚠️  在当前做种列表中未找到唯一精确匹配，已保留: {name}"
+                            )
+                        inspection_failed = True
+                        continue
+
+                    _, matched_hr, matched_html_title = match
+
+                    print(f"🔍 网页唯一匹配: {matched_html_title} (HR: {matched_hr})")
+                    if matched_hr:
+                        print(f"✅ 种子 {name} 带有 HR 标签，保留")
                     else:
-                        print(f"⚠️  在当前做种列表中未找到种子名，跳过 HR 检查，保留: {name}")
-            
+                        print(f"🗑️  种子 {name} 没有 HR 标签")
+                        print(f"🔍 种子哈希: {hash_value}")
+                        action = self.delete_candidate(hash_value, name, torrent_tags)
+                        if action == "deleted":
+                            deleted_count += 1
+                            deleted_torrents.append(name)
+                        elif action == "planned":
+                            planned_count += 1
+                        else:
+                            inspection_failed = True
+
             # 输出结果
             print("\n📊 任务完成统计:")
             print(f"   检查种子数量: {len(target_torrents)}")
             print(f"   删除种子数量: {deleted_count}")
-            
+            print(f"   dry-run 计划删除数量: {planned_count}")
+
             if deleted_torrents:
                 print("\n🗑️  已删除的种子列表:")
                 for i, name in enumerate(deleted_torrents, 1):
                     print(f"   {i}. {name}")
-            
-            return True
-            
+
+            if inspection_failed:
+                print("❌ 部分种子因证据不完整或删除失败而保留")
+            return not inspection_failed
+
         except Exception as e:
             print(f"❌ 执行过程中发生异常: {e}")
             return False
