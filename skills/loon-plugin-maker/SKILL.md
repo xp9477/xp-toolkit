@@ -13,7 +13,8 @@ description: Create Loon proxy plugins by analyzing mitmproxy traffic and modify
 mitmdump -s <skill_dir>/scripts/save_responses.py -p 8080
 ```
 
-脚本自动将所有响应保存到 `mitm_responses/` 目录。
+脚本自动将响应保存到 `mitm_responses/` 目录。抓包前先限定目标 hostname，
+避免把无关 App 的 Cookie、Token 或个人数据写入磁盘。
 
 ### 2. 抓包并全面分析
 
@@ -85,7 +86,7 @@ for (let key of AD_KEYS) {
         "data.payStatus": true
     },
     "mitm_hostnames": ["api.example.com"],
-    "script_url": "https://github.com/user/repo/raw/main/script.js",
+    "script_url": "https://example.com/response-mapping.js",
     "icon_url": "https://example.com/icon.png"
 }
 ```
@@ -97,3 +98,5 @@ for (let key of AD_KEYS) {
 3. **先测试**：确认无异常再扩展修改范围
 4. **MITM 配置**：插件需要配置 MITM hostname
 5. **防御性编码**：始终检查 body 存在性和 JSON 解析错误
+6. **类型保持**：JSON 字符串 `"0"` 与数字 `0` 含义不同，不做隐式转换
+7. **远程脚本**：`script_url` 必须明确配置为 HTTPS 地址
