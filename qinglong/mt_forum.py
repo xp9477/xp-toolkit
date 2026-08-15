@@ -42,6 +42,7 @@ class Script:
             r1 = self.session.get(
                 f"{self.base_url}/member.php?mod=logging&action=login", timeout=15
             )
+            r1.raise_for_status()
             r1.encoding = "utf-8"
         except Exception as e:
             print(f"访问登录页面失败: {e}")
@@ -73,6 +74,7 @@ class Script:
                 data=payload,
                 timeout=15,
             )
+            r2.raise_for_status()
             r2.encoding = "utf-8"
         except Exception as e:
             print(f"提交登录失败: {e}")
@@ -106,6 +108,7 @@ class Script:
             r3 = self.session.get(
                 f"{self.base_url}/plugin.php?id=k_misign:sign", timeout=15
             )
+            r3.raise_for_status()
             r3.encoding = "utf-8"
         except Exception as e:
             print(f"访问签到页面失败: {e}")
@@ -144,6 +147,7 @@ class Script:
                 headers={"Referer": f"{self.base_url}/plugin.php?id=k_misign:sign"},
                 timeout=15,
             )
+            r4.raise_for_status()
             r4.encoding = "utf-8"
         except Exception as e:
             print(f"发送签到请求失败: {e}")
@@ -168,12 +172,12 @@ class Script:
 
         sign_msg = " | ".join(lines) if lines else "未知结果"
 
-        if "签到成功" in r4.text or "今日已签" in r4.text or "CDATA" in r4.text:
+        success_markers = ("签到成功", "今日已签", "已经签到", "已签到")
+        if any(marker in r4.text for marker in success_markers):
             print(f"签到成功！提示: {sign_msg}")
             return True
-        else:
-            print(f"签到失败: {sign_msg}")
-            return False
+        print(f"签到失败: {sign_msg}")
+        return False
 
 
 def main() -> int:
