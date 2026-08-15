@@ -80,7 +80,9 @@ def now_cn() -> datetime:
 
 
 def compact_name(value: str) -> str:
-    return (value or "").strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+    return (
+        (value or "").strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+    )
 
 
 def resolve_player_id(player: str) -> str:
@@ -175,7 +177,9 @@ def load_monitor_config() -> dict[str, Any]:
 
 def default_state_file() -> Path:
     candidates = [
-        Path(os.getenv("QL_DATA_DIR", "/ql/data")) / "ashare_kimi3_monitor" / "state.json",
+        Path(os.getenv("QL_DATA_DIR", "/ql/data"))
+        / "ashare_kimi3_monitor"
+        / "state.json",
         Path("/tmp/ashare_kimi3_monitor_state.json"),
         Path(__file__).resolve().with_name(".ashare_kimi3_state.json"),
     ]
@@ -197,7 +201,9 @@ def in_trading_session(dt: datetime | None = None) -> bool:
     if not is_weekday(dt):
         return False
     t = dt.time()
-    return (MORNING_START <= t <= MORNING_END) or (AFTERNOON_START <= t <= AFTERNOON_END)
+    return (MORNING_START <= t <= MORNING_END) or (
+        AFTERNOON_START <= t <= AFTERNOON_END
+    )
 
 
 def seconds_until_next_session(dt: datetime | None = None) -> float | None:
@@ -359,7 +365,9 @@ def extract_ai_portfolio(data: dict[str, Any], player_id: str) -> dict[str, Any]
     }
 
 
-def format_position(code: str, name: str, ai: dict[str, Any], trade: dict[str, Any]) -> str:
+def format_position(
+    code: str, name: str, ai: dict[str, Any], trade: dict[str, Any]
+) -> str:
     pos = (ai.get("by_code") or {}).get(code)
     trade_shares = safe_int(trade.get("shares"))
     side = str(trade.get("side") or "")
@@ -374,7 +382,7 @@ def format_position(code: str, name: str, ai: dict[str, Any], trade: dict[str, A
     return (
         f"该股仓位: {pos['shares']}股{lock}\n"
         f"成本 @{fmt_price(pos['cost'])} / 现价 @{fmt_price(pos['price'])}\n"
-        f"市值 {fmt_money(pos['market_value'])} / 仓位 {pos['weight']*100:.1f}%\n"
+        f"市值 {fmt_money(pos['market_value'])} / 仓位 {pos['weight'] * 100:.1f}%\n"
         f"浮盈亏 {fmt_money(pos['pnl'], signed=True)}"
     )
 
@@ -387,7 +395,9 @@ def build_trade_message(trade: dict[str, Any], ai: dict[str, Any]) -> tuple[str,
     price = safe_float(trade.get("price"))
     amount = shares * price
     ts = f"{trade.get('date', '')} {trade.get('time', '')}".strip()
-    reason = (trade.get("reason") or trade.get("desc") or trade.get("memo") or "").strip()
+    reason = (
+        trade.get("reason") or trade.get("desc") or trade.get("memo") or ""
+    ).strip()
     player = str(trade.get("player") or "Kimi-K3")
 
     title = f"K3 {side} {name}"
@@ -403,7 +413,7 @@ def build_trade_message(trade: dict[str, Any], ai: dict[str, Any]) -> tuple[str,
         (
             f"账户: NAV {fmt_money(ai['nav'])} "
             f"当日{fmt_pct(ai['day_ret'])} 累计{fmt_pct(ai['total_ret'])} "
-            f"现金{ai['cash_weight']*100:.1f}%"
+            f"现金{ai['cash_weight'] * 100:.1f}%"
         ),
     ]
     if ai.get("updated"):
@@ -418,7 +428,7 @@ def build_start_message(ai: dict[str, Any], trade_count: int) -> tuple[str, str]
         (
             f"账户 NAV {fmt_money(ai['nav'])} "
             f"当日{fmt_pct(ai['day_ret'])} 累计{fmt_pct(ai['total_ret'])} "
-            f"现金{ai['cash_weight']*100:.1f}%"
+            f"现金{ai['cash_weight'] * 100:.1f}%"
         ),
         f"当前持仓 {len(ai['holdings'])} 只 / 历史成交基线 {trade_count} 条",
         "【当前持仓】",
@@ -430,7 +440,7 @@ def build_start_message(ai: dict[str, Any], trade_count: int) -> tuple[str, str]
             lock = "🔒" if h.get("locked") else ""
             lines.append(
                 f"{h['code']} {h['name']}{lock} {h['shares']}股 "
-                f"@{fmt_price(h['price'])} 仓位{h['weight']*100:.1f}% "
+                f"@{fmt_price(h['price'])} 仓位{h['weight'] * 100:.1f}% "
                 f"盈亏{fmt_money(h['pnl'], signed=True)}"
             )
     if ai.get("updated"):
@@ -460,7 +470,9 @@ def notify_action(title: str, content: str) -> None:
         print("警告: Bark 分段推送存在失败，请检查青龙环境变量 notify 与脚本日志")
 
 
-def poll_once(config: dict[str, Any], state: dict[str, Any], *, bootstrap: bool) -> dict[str, Any]:
+def poll_once(
+    config: dict[str, Any], state: dict[str, Any], *, bootstrap: bool
+) -> dict[str, Any]:
     data = fetch_snapshot(config["url"])
     player_id = config["player_ids"][0]
     ai = extract_ai_portfolio(data, player_id)
@@ -470,7 +482,8 @@ def poll_once(config: dict[str, Any], state: dict[str, Any], *, bootstrap: bool)
     matched = [
         t
         for t in (data.get("trades") or [])
-        if isinstance(t, dict) and player_matched(str(t.get("player", "")), config["players"])
+        if isinstance(t, dict)
+        and player_matched(str(t.get("player", "")), config["players"])
     ]
     matched.sort(key=trade_sort_key)
 
@@ -552,12 +565,14 @@ def run_monitor() -> None:
 
     bark_cfg = notify.get_bark_push()
     if bark_cfg:
-        masked = bark_cfg if len(bark_cfg) <= 10 else f"{bark_cfg[:4]}***{bark_cfg[-4:]}"
+        masked = (
+            bark_cfg if len(bark_cfg) <= 10 else f"{bark_cfg[:4]}***{bark_cfg[-4:]}"
+        )
         print(f"Bark 配置已加载: {masked}")
     else:
         print("=" * 50)
         print("严重: 未检测到 Bark 配置，将不会有手机推送！")
-        print('请在青龙「环境变量」添加: notify = 你的Bark设备key')
+        print("请在青龙「环境变量」添加: notify = 你的Bark设备key")
         print('也可: notify={"bark":"你的Bark设备key"}')
         print("=" * 50)
 
@@ -569,8 +584,20 @@ def run_monitor() -> None:
 
     # 每次进程启动先打一条短推送，证明 Bark 通路（与是否有新成交无关）
     # 可用环境变量 ASHARE_SKIP_START_NOTIFY=1 关闭；配置 notify_on_start=false 也会关闭
-    force_test = os.getenv("ASHARE_TEST_NOTIFY", "").strip() in {"1", "true", "True", "yes", "YES"}
-    skip_start = os.getenv("ASHARE_SKIP_START_NOTIFY", "").strip() in {"1", "true", "True", "yes", "YES"}
+    force_test = os.getenv("ASHARE_TEST_NOTIFY", "").strip() in {
+        "1",
+        "true",
+        "True",
+        "yes",
+        "YES",
+    }
+    skip_start = os.getenv("ASHARE_SKIP_START_NOTIFY", "").strip() in {
+        "1",
+        "true",
+        "True",
+        "yes",
+        "YES",
+    }
     if force_test or (config.get("notify_on_start", True) and not skip_start):
         title = "Kimi-K3 监控启动"
         ts = now_cn().strftime("%Y-%m-%d %H:%M:%S")
@@ -585,7 +612,9 @@ def run_monitor() -> None:
 
     if config["once"]:
         if not in_trading_session() and not bootstrap and not os.getenv("ASHARE_FORCE"):
-            print(f"当前非交易时段: {now_cn().isoformat(timespec='seconds')}，once 模式退出")
+            print(
+                f"当前非交易时段: {now_cn().isoformat(timespec='seconds')}，once 模式退出"
+            )
             return
         state = poll_once(config, state, bootstrap=bootstrap)
         save_state(state_path, state)
@@ -613,7 +642,9 @@ def run_monitor() -> None:
             return
 
         wake = now + timedelta(seconds=wait_sec)
-        print(f"非交易时段，休眠 {int(wait_sec)}s，预计 {wake.strftime('%H:%M:%S')} 继续")
+        print(
+            f"非交易时段，休眠 {int(wait_sec)}s，预计 {wake.strftime('%H:%M:%S')} 继续"
+        )
         while wait_sec > 0:
             chunk = min(wait_sec, max(config["interval"], 30))
             wait_interruptible(chunk)

@@ -40,7 +40,9 @@ class ConfigTests(unittest.TestCase):
 class AuthorizationTests(unittest.TestCase):
     def test_bearer_token_is_exact(self):
         self.assertTrue(webhook_server.authorization_matches("Bearer secret", "secret"))
-        self.assertFalse(webhook_server.authorization_matches("Bearer secret-x", "secret"))
+        self.assertFalse(
+            webhook_server.authorization_matches("Bearer secret-x", "secret")
+        )
         self.assertFalse(webhook_server.authorization_matches(None, "secret"))
 
 

@@ -130,7 +130,9 @@ class WebhookHTTPServer(HTTPServer):
 class WebhookHandler(BaseHTTPRequestHandler):
     server: WebhookHTTPServer
 
-    def _send_text(self, status: int, message: str, retry_after: int | None = None) -> None:
+    def _send_text(
+        self, status: int, message: str, retry_after: int | None = None
+    ) -> None:
         body = message.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/plain; charset=utf-8")

@@ -19,7 +19,9 @@ class BarkSecurityTests(unittest.TestCase):
         secret = "device-secret-value"
         output = io.StringIO()
         with (
-            patch.object(notify, "get_bark_push", return_value=f"http://push.example/{secret}"),
+            patch.object(
+                notify, "get_bark_push", return_value=f"http://push.example/{secret}"
+            ),
             patch.dict(os.environ, {}, clear=True),
             contextlib.redirect_stdout(output),
         ):
@@ -41,7 +43,9 @@ class BarkSecurityTests(unittest.TestCase):
         with (
             patch.object(notify, "get_bark_push", return_value="device-key"),
             patch.object(notify, "_send_bark_post", return_value=(False, "POST 500")),
-            patch.object(notify, "_send_bark_get", return_value=(True, "GET 200")) as send_get,
+            patch.object(
+                notify, "_send_bark_get", return_value=(True, "GET 200")
+            ) as send_get,
             patch.dict(os.environ, {"BARK_ALLOW_GET": "true"}, clear=True),
         ):
             self.assertTrue(notify.send("title", "body"))

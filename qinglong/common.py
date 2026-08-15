@@ -152,7 +152,9 @@ def get_env(key: str, default: str | None = None, required: bool = False) -> str
     return value
 
 
-def _read_script_env(file_path: str | os.PathLike[str], required: bool = True) -> tuple[str, str | None]:
+def _read_script_env(
+    file_path: str | os.PathLike[str], required: bool = True
+) -> tuple[str, str | None]:
     env_name = get_script_env_name(file_path)
     value = get_env(env_name)
 
@@ -182,7 +184,9 @@ def load_config(file_path: str | os.PathLike[str], required: bool = True) -> Any
     return _parse_json(value, env_name)
 
 
-def _append_account(accounts: list[dict[str, Any]], item: Any, env_name: str, index: int | None = None) -> None:
+def _append_account(
+    accounts: list[dict[str, Any]], item: Any, env_name: str, index: int | None = None
+) -> None:
     if isinstance(item, dict):
         accounts.append(item)
         return
@@ -374,7 +378,13 @@ def run_single_script(
             display_name=display_name,
         )
 
-    return _finalize_run(file_path, total_count=1, success_count=1, failures=[], notify_module=notify_module)
+    return _finalize_run(
+        file_path,
+        total_count=1,
+        success_count=1,
+        failures=[],
+        notify_module=notify_module,
+    )
 
 
 def run_account_scripts(

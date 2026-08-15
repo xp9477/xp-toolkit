@@ -36,6 +36,9 @@ jobs:
       - name: Lint Python
         run: ruff check .
 
+      - name: Check Python formatting
+        run: ruff format --check .
+
       - name: Check Python syntax
         run: python -m compileall -q .github/scripts qinglong skills/loon-plugin-maker/scripts
 

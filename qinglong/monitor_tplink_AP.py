@@ -18,7 +18,9 @@ def load_monitor_config():
     if not isinstance(config, dict):
         raise ValueError("monitor_tplink_AP 配置必须为 JSON 对象")
 
-    verify_tls = parse_bool(config.get("verify_tls"), default=True, field_name="verify_tls")
+    verify_tls = parse_bool(
+        config.get("verify_tls"), default=True, field_name="verify_tls"
+    )
     ca_bundle = str(config.get("ca_bundle") or "").strip()
     url = validate_service_origin(
         config.get("url", ""),

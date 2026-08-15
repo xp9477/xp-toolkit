@@ -19,8 +19,10 @@ import requests
 try:
     from dotenv import load_dotenv
 except ImportError:  # 青龙通常有；本地调试可无
+
     def load_dotenv(*_a, **_k):
         return False
+
 
 from common import get_env, get_script_env_name, parse_bool, validate_service_origin
 
@@ -53,7 +55,9 @@ def _extract_key_from_mapping(config: dict[str, Any]) -> str:
     )
 
 
-def _normalize_bark_target(raw: str, *, allow_insecure_http: bool = False) -> tuple[str, str]:
+def _normalize_bark_target(
+    raw: str, *, allow_insecure_http: bool = False
+) -> tuple[str, str]:
     """
     返回 (server_base, device_key)。
     支持:
@@ -119,7 +123,9 @@ def get_bark_push() -> str:
     return raw
 
 
-def _send_bark_post(server: str, device_key: str, title: str, content: str) -> tuple[bool, str]:
+def _send_bark_post(
+    server: str, device_key: str, title: str, content: str
+) -> tuple[bool, str]:
     url = f"{server.rstrip('/')}/push"
     payload = {
         "title": title,
@@ -143,7 +149,9 @@ def _send_bark_post(server: str, device_key: str, title: str, content: str) -> t
     return ok, f"{detail} {msg}".rstrip()
 
 
-def _send_bark_get(server: str, device_key: str, title: str, content: str) -> tuple[bool, str]:
+def _send_bark_get(
+    server: str, device_key: str, title: str, content: str
+) -> tuple[bool, str]:
     # GET 路径方式对长中文不友好，仅作后备
     url = f"{server.rstrip('/')}/{device_key}/{quote(title)}/{quote(content)}"
     if len(url) > 1800:
@@ -195,8 +203,12 @@ def send(title: str, content: str) -> bool:
         print("警告: Bark 正通过显式允许的明文 HTTP 发送")
 
     # 脱敏日志
-    masked = device_key if len(device_key) <= 8 else f"{device_key[:4]}***{device_key[-4:]}"
-    print(f"Bark 推送中: server={server} key={masked} title={title!r} body_len={len(content)}")
+    masked = (
+        device_key if len(device_key) <= 8 else f"{device_key[:4]}***{device_key[-4:]}"
+    )
+    print(
+        f"Bark 推送中: server={server} key={masked} title={title!r} body_len={len(content)}"
+    )
 
     try:
         ok, detail = _send_bark_post(server, device_key, title, content)

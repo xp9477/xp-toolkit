@@ -94,10 +94,10 @@ class Script:
             }
         )
         table_path = urllib.parse.quote(config["table"], safe="._-")
-        url = f'{config["url"]}/rest/v1/{table_path}?{query}'
+        url = f"{config['url']}/rest/v1/{table_path}?{query}"
         headers = {
             "apikey": config["secret_key"],
-            "Authorization": f'Bearer {config["secret_key"]}',
+            "Authorization": f"Bearer {config['secret_key']}",
             "Accept": "application/json",
             "Accept-Profile": config["schema"],
         }
@@ -107,24 +107,26 @@ class Script:
             with urllib.request.urlopen(request, timeout=config["timeout"]) as response:
                 body = response.read().decode("utf-8", errors="replace")
                 print(
-                    f'[{config["name"]}] keepalive ok: '
-                    f'http={response.status}, schema={config["schema"]}, table={config["table"]}'
+                    f"[{config['name']}] keepalive ok: "
+                    f"http={response.status}, schema={config['schema']}, table={config['table']}"
                 )
                 if body:
-                    print(f'[{config["name"]}] response_bytes={len(body.encode("utf-8"))}')
+                    print(
+                        f"[{config['name']}] response_bytes={len(body.encode('utf-8'))}"
+                    )
                 return True
         except urllib.error.HTTPError as exc:
             body = exc.read()
-            message = f'[{config["name"]}] keepalive failed: http={exc.code}'
+            message = f"[{config['name']}] keepalive failed: http={exc.code}"
             if body:
                 message = f"{message}, response_bytes={len(body)}"
             if exc.code == 540:
                 message = f"{message}。项目已暂停，请先在 Supabase Dashboard 恢复"
             raise ValueError(message) from exc
         except urllib.error.URLError as exc:
-            raise ValueError(f'[{config["name"]}] 请求失败: {exc.reason}') from exc
+            raise ValueError(f"[{config['name']}] 请求失败: {exc.reason}") from exc
         except Exception as exc:
-            raise ValueError(f'[{config["name"]}] 请求失败: {exc}') from exc
+            raise ValueError(f"[{config['name']}] 请求失败: {exc}") from exc
 
 
 def main() -> None:

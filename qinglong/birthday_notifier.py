@@ -91,4 +91,6 @@ def check_birthdays():
 
 
 if __name__ == "__main__":
-    raise SystemExit(run_single_script(__file__, check_birthdays, notify_module=notify).exit_code)
+    raise SystemExit(
+        run_single_script(__file__, check_birthdays, notify_module=notify).exit_code
+    )

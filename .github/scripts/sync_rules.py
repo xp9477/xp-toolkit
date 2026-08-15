@@ -46,10 +46,20 @@ def parse_loon(path):
                 result.append(("comment", line))
             elif line.startswith("DOMAIN-SUFFIX,"):
                 result.append(
-                    ("domain-suffix", _domain(source, number, line, line.removeprefix("DOMAIN-SUFFIX,")))
+                    (
+                        "domain-suffix",
+                        _domain(
+                            source, number, line, line.removeprefix("DOMAIN-SUFFIX,")
+                        ),
+                    )
                 )
             elif line.startswith("DOMAIN,"):
-                result.append(("domain", _domain(source, number, line, line.removeprefix("DOMAIN,"))))
+                result.append(
+                    (
+                        "domain",
+                        _domain(source, number, line, line.removeprefix("DOMAIN,")),
+                    )
+                )
             else:
                 raise _error(source, number, line, "不支持的 Loon 规则")
     return result
@@ -76,11 +86,18 @@ def parse_clash(path):
                 result.append(
                     (
                         "domain-suffix",
-                        _domain(source, number, line, line.removeprefix("- DOMAIN-SUFFIX,")),
+                        _domain(
+                            source, number, line, line.removeprefix("- DOMAIN-SUFFIX,")
+                        ),
                     )
                 )
             elif line.startswith("- DOMAIN,"):
-                result.append(("domain", _domain(source, number, line, line.removeprefix("- DOMAIN,"))))
+                result.append(
+                    (
+                        "domain",
+                        _domain(source, number, line, line.removeprefix("- DOMAIN,")),
+                    )
+                )
             else:
                 raise _error(source, number, line, "不支持的 Clash 规则")
     if not saw_payload:
@@ -108,9 +125,14 @@ def parse_quanx(path, expected_policy=None):
                 raise _error(source, number, line, "策略名不能为空")
             if expected_policy is not None and policy != expected_policy:
                 raise _error(
-                    source, number, line, f"策略应为 {expected_policy!r}，实际为 {policy!r}"
+                    source,
+                    number,
+                    line,
+                    f"策略应为 {expected_policy!r}，实际为 {policy!r}",
                 )
-            result.append(("domain-suffix" if kind == "HOST-SUFFIX" else "domain", value))
+            result.append(
+                ("domain-suffix" if kind == "HOST-SUFFIX" else "domain", value)
+            )
     return result
 
 
@@ -118,7 +140,9 @@ def _atomic_write(path, lines):
     target = _path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     mode = target.stat().st_mode & 0o777 if target.exists() else 0o644
-    descriptor, temporary_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=target.parent, prefix=f".{target.name}."
+    )
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as file:
@@ -133,7 +157,10 @@ def _atomic_write(path, lines):
 
 def write_loon(intermediate, path):
     prefixes = {"domain": "DOMAIN", "domain-suffix": "DOMAIN-SUFFIX"}
-    lines = [value if kind == "comment" else f"{prefixes[kind]},{value}" for kind, value in intermediate]
+    lines = [
+        value if kind == "comment" else f"{prefixes[kind]},{value}"
+        for kind, value in intermediate
+    ]
     _atomic_write(path, lines)
 
 
@@ -201,13 +228,14 @@ def sync_from(changed_files, *, rule_sets=None):
     written = []
     for rule_set in RULE_SETS if rule_sets is None else rule_sets:
         formats = [
-            fmt for fmt in ("loon", "clash", "quanx") if _changed_path(rule_set[fmt]) in changed
+            fmt
+            for fmt in ("loon", "clash", "quanx")
+            if _changed_path(rule_set[fmt]) in changed
         ]
         if not formats:
             continue
         parsed = {
-            fmt: parse(fmt, rule_set[fmt], policy=rule_set["policy"])
-            for fmt in formats
+            fmt: parse(fmt, rule_set[fmt], policy=rule_set["policy"]) for fmt in formats
         }
         source_format = formats[0]
         intermediate = parsed[source_format]
@@ -215,7 +243,9 @@ def sync_from(changed_files, *, rule_sets=None):
             raise RuleSyncError(
                 f"[{rule_set['name']}] 同一次提交修改了内容不一致的来源: {', '.join(formats)}"
             )
-        print(f"[{rule_set['name']}] source={source_format}, file={rule_set[source_format]}")
+        print(
+            f"[{rule_set['name']}] source={source_format}, file={rule_set[source_format]}"
+        )
         for fmt in ("loon", "clash", "quanx"):
             if fmt in formats:
                 continue

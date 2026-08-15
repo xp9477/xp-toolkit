@@ -29,8 +29,12 @@ class DistributionLinkTests(unittest.TestCase):
             for relative_path in CURRENT_RAW_URL.findall(source):
                 checked += 1
                 target = ROOT / relative_path
-                self.assertTrue(target.is_file(), f"broken raw link in {path}: {target}")
-        self.assertGreater(checked, 0, "expected at least one local raw distribution link")
+                self.assertTrue(
+                    target.is_file(), f"broken raw link in {path}: {target}"
+                )
+        self.assertGreater(
+            checked, 0, "expected at least one local raw distribution link"
+        )
 
 
 if __name__ == "__main__":

@@ -41,7 +41,9 @@ class TpLinkConfigTests(unittest.TestCase):
 
     def test_plain_http_requires_explicit_insecure_migration_flag(self):
         with self.assertRaises(common.ConfigError):
-            self.load('{"url":"http://ap.local","username":"admin","password":"secret"}')
+            self.load(
+                '{"url":"http://ap.local","username":"admin","password":"secret"}'
+            )
         config = self.load(
             '{"url":"http://ap.local","username":"admin","password":"secret",'
             '"verify_tls":false}'

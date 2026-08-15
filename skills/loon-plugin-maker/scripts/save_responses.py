@@ -79,12 +79,13 @@ def redact_json(value):
 def redact_url(value):
     parsed = urlsplit(value)
     query = urlencode(
-        [(key, "<redacted>") for key, _ in parse_qsl(parsed.query, keep_blank_values=True)],
+        [
+            (key, "<redacted>")
+            for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+        ],
         doseq=True,
     )
-    return urlunsplit(
-        (parsed.scheme, parsed.netloc, parsed.path, query, "")
-    )
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, ""))
 
 
 def _safe_component(value, limit):
