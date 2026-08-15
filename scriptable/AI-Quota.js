@@ -121,7 +121,18 @@ function readConfig() {
 }
 
 function hasAnyAuth(cfg) {
-  return !!cfg.cpaApiKey;
+  return !!(cfg.cpaBaseUrl && cfg.cpaApiKey);
+}
+
+function cacheScope(cfg) {
+  // FNV-1a 仅用于隔离缓存，不作为密码学摘要；缓存中不保存原始 API Key。
+  const input = `${cfg.cpaBaseUrl || ""}\u0000${cfg.cpaApiKey || ""}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 async function promptField(title, message, placeholder, value, secure) {
@@ -358,6 +369,11 @@ function findCpaFile(files, testers) {
   );
 }
 
+function authIndexOf(file) {
+  const value = file?.auth_index ?? file?.authIndex;
+  return value == null || value === "" ? null : value;
+}
+
 // ---------- Parsers ----------
 function parseGrokBilling(body) {
   const cfg = body?.config || body || {};
@@ -380,13 +396,14 @@ function parseGrokBilling(body) {
 }
 
 function prettyChatPlan(plan) {
-  const p = String(plan || "").toLowerCase();
+  const raw = String(plan || "");
+  const p = raw.toLowerCase();
   if (!p) return "Plus";
   if (p === "plus") return "Plus";
   if (p === "pro") return "Pro";
   if (p === "free") return "Free";
   if (p === "team") return "Team";
-  return plan.charAt(0).toUpperCase() + plan.slice(1);
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
 function windowLabelFromSeconds(seconds) {
@@ -405,11 +422,12 @@ function isLatentWindow(win) {
 }
 
 function normalizeUsageWindow(win) {
-  if (typeof win?.used_percent !== "number") return null;
+  const usedPercent = Number(win?.used_percent);
+  if (!Number.isFinite(usedPercent)) return null;
   const seconds = Number(win.limit_window_seconds);
   return {
-    usedPct: clampPct(win.used_percent),
-    remainingPct: clampPct(100 - win.used_percent),
+    usedPct: clampPct(usedPercent),
+    remainingPct: clampPct(100 - usedPercent),
     seconds: Number.isFinite(seconds) ? seconds : null,
     resetHint: parseResetHint(win.reset_at),
     label: windowLabelFromSeconds(seconds),
@@ -510,9 +528,10 @@ async function fetchGrok(cfg, files) {
     return emptyService("grok", "SuperGrok", URLS.grok, "未配置");
   }
   const xai = findCpaFile(files, [/xai/, /grok/]);
-  if (!xai?.auth_index) throw new Error("CPA 未找到 Grok 认证");
+  const authIndex = authIndexOf(xai);
+  if (authIndex == null) throw new Error("CPA 未找到 Grok 认证");
   const resp = await cpaApiCall(cfg.cpaBaseUrl, cfg.cpaApiKey, {
-    authIndex: xai.auth_index,
+    authIndex,
     method: "GET",
     url: "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
     header: {
@@ -531,7 +550,8 @@ async function fetchChatGPT(cfg, files) {
     return emptyService("chatgpt", "ChatGPT", URLS.chatgpt, "未配置");
   }
   const openai = findCpaFile(files, [/openai/, /chatgpt/, /codex/]);
-  if (!openai?.auth_index) throw new Error("CPA 未找到 ChatGPT 认证");
+  const authIndex = authIndexOf(openai);
+  if (authIndex == null) throw new Error("CPA 未找到 ChatGPT 认证");
   const accountId =
     openai.account_id || openai.accountId || openai.chatgpt_account_id || openai.chatgptAccountId || "";
   const header = {
@@ -540,7 +560,7 @@ async function fetchChatGPT(cfg, files) {
   };
   if (accountId) header["ChatGPT-Account-Id"] = String(accountId);
   const resp = await cpaApiCall(cfg.cpaBaseUrl, cfg.cpaApiKey, {
-    authIndex: openai.auth_index,
+    authIndex,
     method: "GET",
     url: "https://chatgpt.com/backend-api/wham/usage",
     header,
@@ -553,10 +573,11 @@ async function fetchGemini(cfg, files) {
     return emptyService("gemini", "Gemini", URLS.gemini, "未配置");
   }
   const ag = findCpaFile(files, [/antigravity/, /gemini/]);
-  if (!ag?.auth_index) throw new Error("CPA 未找到 Google 认证");
+  const authIndex = authIndexOf(ag);
+  if (authIndex == null) throw new Error("CPA 未找到 Google 认证");
   const project = ag.project_id || ag.projectId || "";
   const resp = await cpaApiCall(cfg.cpaBaseUrl, cfg.cpaApiKey, {
-    authIndex: ag.auth_index,
+    authIndex,
     method: "POST",
     url: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
     header: {
@@ -585,15 +606,20 @@ async function fetchAll(cfg) {
     ["gemini", () => fetchGemini(cfg, files), "Gemini", URLS.gemini],
   ];
 
+  const results = await Promise.all(
+    jobs.map(async ([id, fn, name, url]) => {
+      try {
+        return [id, await fn(), null];
+      } catch (e) {
+        const msg = friendlyHttpError(e);
+        return [id, emptyService(id, name, url, msg), `${name}: ${msg}`];
+      }
+    })
+  );
   const services = {};
-  for (const [id, fn, name, url] of jobs) {
-    try {
-      services[id] = await fn();
-    } catch (e) {
-      const msg = friendlyHttpError(e);
-      errors.push(`${name}: ${msg}`);
-      services[id] = emptyService(id, name, url, msg);
-    }
+  for (const [id, service, error] of results) {
+    services[id] = service;
+    if (error) errors.push(error);
   }
 
   return {
@@ -612,7 +638,10 @@ function mergeCachedService(fresh, cached, id) {
 }
 
 async function getData(cfg) {
-  const cached = loadCache();
+  const scope = cacheScope(cfg);
+  const loaded = loadCache();
+  // 旧缓存没有 scope；地址或 Key 变化时也必须立即失效，避免串账号显示。
+  const cached = loaded?.scope === scope ? loaded : null;
   const now = Date.now();
   if (cached?.data?.fetchedAt) {
     const age = now - new Date(cached.data.fetchedAt).getTime();
@@ -628,7 +657,7 @@ async function getData(cfg) {
       data.gemini = mergeCachedService(data, cached.data, "gemini");
     }
     if (data.grok?.ok || data.chatgpt?.ok || data.gemini?.ok) {
-      saveCache({ savedAt: new Date().toISOString(), data });
+      saveCache({ scope, savedAt: new Date().toISOString(), data });
     }
     return { data, fromCache: false, stale: false };
   } catch (e) {
