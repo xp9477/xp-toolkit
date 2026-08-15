@@ -9,12 +9,12 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from mitmproxy import http
-
 DEFAULT_SAVE_DIR = "mitm_responses"
 DEFAULT_MAX_BODY_BYTES = 1024 * 1024
+BODY_MODES = frozenset({"metadata", "structure", "unsafe"})
 SENSITIVE_NAME = re.compile(
-    r"(?:authorization|cookie|token|secret|password|passwd|api[-_]?key|session)",
+    r"(?:auth|cookie|token|secret|password|passwd|credential|signature|"
+    r"api[-_]?key|(?:^|[-_])key(?:$|[-_])|session)",
     re.IGNORECASE,
 )
 
@@ -44,13 +44,20 @@ def host_allowed(host, patterns):
 
 
 def redact_headers(headers):
-    return {
-        str(name): "<redacted>" if SENSITIVE_NAME.search(str(name)) else str(value)
-        for name, value in headers.items()
-    }
+    redacted = {}
+    for name, value in headers.items():
+        key = str(name)
+        if SENSITIVE_NAME.search(key):
+            redacted[key] = "<redacted>"
+        elif key.casefold() in {"location", "referer"}:
+            redacted[key] = redact_url(str(value))
+        else:
+            redacted[key] = str(value)
+    return redacted
 
 
 def redact_json(value):
+    """Preserve JSON shape without retaining any string value."""
     if isinstance(value, dict):
         return {
             key: "<redacted>" if SENSITIVE_NAME.search(str(key)) else redact_json(item)
@@ -58,19 +65,26 @@ def redact_json(value):
         }
     if isinstance(value, list):
         return [redact_json(item) for item in value]
+    if isinstance(value, str):
+        return f"<redacted-string: {len(value)} chars>"
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, int):
+        return 0
+    if isinstance(value, float):
+        return 0.0
     return value
 
 
 def redact_url(value):
     parsed = urlsplit(value)
     query = urlencode(
-        [
-            (key, "<redacted>" if SENSITIVE_NAME.search(key) else item)
-            for key, item in parse_qsl(parsed.query, keep_blank_values=True)
-        ],
+        [(key, "<redacted>") for key, _ in parse_qsl(parsed.query, keep_blank_values=True)],
         doseq=True,
     )
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, query, "")
+    )
 
 
 def _safe_component(value, limit):
@@ -79,7 +93,13 @@ def _safe_component(value, limit):
 
 
 class ResponseSaver:
-    def __init__(self, save_dir=None, hosts=None, max_body_bytes=None):
+    def __init__(
+        self,
+        save_dir=None,
+        hosts=None,
+        max_body_bytes=None,
+        body_mode=None,
+    ):
         self.save_dir = Path(
             save_dir or os.getenv("MITM_CAPTURE_DIR", DEFAULT_SAVE_DIR)
         ).resolve()
@@ -96,14 +116,50 @@ class ResponseSaver:
         self.max_body_bytes = int(raw_limit)
         if self.max_body_bytes < 0:
             raise ValueError("MITM_CAPTURE_MAX_BYTES 不能为负数")
+        raw_body_mode = (
+            body_mode
+            if body_mode is not None
+            else os.getenv("MITM_CAPTURE_BODY_MODE", "metadata")
+        )
+        if not isinstance(raw_body_mode, str):
+            raise ValueError("MITM_CAPTURE_BODY_MODE 必须是字符串")
+        self.body_mode = raw_body_mode.strip().casefold()
+        if self.body_mode not in BODY_MODES:
+            choices = ", ".join(sorted(BODY_MODES))
+            raise ValueError(f"MITM_CAPTURE_BODY_MODE 必须是: {choices}")
         self.counter = 0
         if not self.hosts:
             print("[Capture disabled] 请设置 MITM_CAPTURE_HOSTS=api.example.com")
         else:
-            self.save_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            self._prepare_save_dir()
+
+    def _prepare_save_dir(self):
+        """Create and protect only the dedicated leaf, never chmod user dirs."""
+        if not self.save_dir.parent.is_dir():
+            raise ValueError(
+                f"抓包输出目录的上级目录不存在，请先显式创建: {self.save_dir.parent}"
+            )
+        try:
+            self.save_dir.mkdir(mode=0o700)
+        except FileExistsError:
+            if not self.save_dir.is_dir():
+                raise ValueError(f"抓包输出路径不是目录: {self.save_dir}") from None
+        else:
             self.save_dir.chmod(0o700)
 
-    def response(self, flow: http.HTTPFlow):
+    def _capture_body(self, content):
+        if self.body_mode == "metadata":
+            return "<omitted: metadata-only mode>"
+        if len(content) > self.max_body_bytes:
+            return f"<omitted: {len(content)} bytes exceeds limit>"
+        if self.body_mode == "unsafe":
+            return content.decode("utf-8", errors="replace")
+        try:
+            return redact_json(json.loads(content.decode("utf-8-sig")))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return "<omitted: non-JSON body in structure mode>"
+
+    def response(self, flow):
         if (
             not self.hosts
             or not host_allowed(flow.request.host, self.hosts)
@@ -134,13 +190,7 @@ class ResponseSaver:
             "request_headers": redact_headers(flow.request.headers),
             "response_headers": redact_headers(flow.response.headers),
         }
-        if len(content) > self.max_body_bytes:
-            data["body"] = f"<omitted: {len(content)} bytes exceeds limit>"
-        else:
-            try:
-                data["body"] = redact_json(json.loads(content.decode("utf-8")))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                data["body"] = content.decode("utf-8", errors="replace")
+        data["body"] = self._capture_body(content)
 
         destination = self.save_dir / filename
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

@@ -14,6 +14,7 @@ HOST = re.compile(
     r"^(?:\*\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?::\d{1,5})?$"
 )
+HOST_LABEL_PATTERN = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 
 
 class ConfigError(ValueError):
@@ -114,8 +115,29 @@ def _target(value):
     return host, f"{host}/{path}" if separator else host
 
 
+def _hostname_pattern(host):
+    """Convert a validated MITM hostname into a URL-regex fragment."""
+    if not host.startswith("*."):
+        return re.escape(host)
+
+    suffix = host[2:]
+    hostname, separator, port = suffix.rpartition(":")
+    if separator and port.isdigit():
+        suffix_pattern = re.escape(hostname) + ":" + re.escape(port)
+    else:
+        suffix_pattern = re.escape(suffix)
+    # Keep the same semantics as MITM ``*.example.com``: require at least
+    # one subdomain label, while allowing nested subdomains.
+    return rf"(?:{HOST_LABEL_PATTERN}\.)+{suffix_pattern}"
+
+
 def generate_plugin(app_name, script_url, mitm_hostnames, icon_url=None):
-    if not isinstance(app_name, str) or not app_name.strip() or "\n" in app_name or "\r" in app_name:
+    if (
+        not isinstance(app_name, str)
+        or not app_name.strip()
+        or "\n" in app_name
+        or "\r" in app_name
+    ):
         raise ConfigError("app_name 不合法")
     script_url = _https_url(script_url, "script_url")
     if icon_url:
@@ -126,9 +148,12 @@ def generate_plugin(app_name, script_url, mitm_hostnames, icon_url=None):
     targets = [_target(value) for value in mitm_hostnames]
     hosts = list(dict.fromkeys(host for host, _ in targets))
     rules = []
-    for _, target in targets:
-        pattern = f"^https?://{re.escape(target).replace(chr(92) + '/', '/')}"
-        if "/" not in target:
+    for host, target in targets:
+        _, separator, path = target.partition("/")
+        pattern = f"^https?://{_hostname_pattern(host)}"
+        if separator:
+            pattern += "/" + re.escape(path)
+        else:
             pattern += "/"
         rules.append(
             f"http-response {pattern} script-path={script_url}, "
@@ -171,7 +196,13 @@ def _safe_filename(app_name):
 
 
 def build(config):
-    required = ("app_name", "url_pattern", "field_mappings", "mitm_hostnames", "script_url")
+    required = (
+        "app_name",
+        "url_pattern",
+        "field_mappings",
+        "mitm_hostnames",
+        "script_url",
+    )
     missing = [name for name in required if name not in config]
     if missing:
         raise ConfigError(f"缺少配置字段: {', '.join(missing)}")

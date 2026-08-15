@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -42,6 +43,23 @@ class GeneratorTests(unittest.TestCase):
                 "https://example.com/script.js",
                 ["api.example.com\n[MITM]"],
             )
+
+    def test_wildcard_hostname_becomes_a_real_url_regex(self):
+        plugin = generate_plugin.generate_plugin(
+            "App",
+            "https://example.com/script.js",
+            ["*.example.com/api/user"],
+        )
+        line = next(
+            line for line in plugin.splitlines() if line.startswith("http-response")
+        )
+        pattern = line.split(" ", 2)[1]
+        self.assertIsNotNone(re.match(pattern, "https://api.example.com/api/user"))
+        self.assertIsNotNone(re.match(pattern, "https://v2.api.example.com/api/user"))
+        self.assertIsNone(re.match(pattern, "https://example.com/api/user"))
+        self.assertIsNone(re.match(pattern, "https://evil-example.com/api/user"))
+        self.assertIsNone(re.match(pattern, "https://user@api.example.com/api/user"))
+        self.assertNotIn(r"\*", pattern)
 
     def test_documented_one_argument_cli_writes_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
