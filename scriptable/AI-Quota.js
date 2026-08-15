@@ -116,12 +116,45 @@ function readConfig() {
 
   if (!cfg.cpaBaseUrl && Keychain.contains(KEY.cpaBase)) cfg.cpaBaseUrl = Keychain.get(KEY.cpaBase);
   if (!cfg.cpaApiKey && Keychain.contains(KEY.cpaKey)) cfg.cpaApiKey = Keychain.get(KEY.cpaKey);
-  cfg.cpaBaseUrl = (cfg.cpaBaseUrl || "").replace(/\/+$/, "");
+  try {
+    cfg.cpaBaseUrl = normalizeCpaBaseUrl(cfg.cpaBaseUrl);
+  } catch (e) {
+    cfg.configError = String(e.message || e);
+    cfg.cpaBaseUrl = "";
+  }
   return cfg;
 }
 
 function hasAnyAuth(cfg) {
-  return !!(cfg.cpaBaseUrl && cfg.cpaApiKey);
+  if (!cfg.cpaBaseUrl || !cfg.cpaApiKey) return false;
+  try {
+    normalizeCpaBaseUrl(cfg.cpaBaseUrl);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function normalizeCpaBaseUrl(value) {
+  const clean = String(value || "").trim().replace(/\/+$/, "");
+  if (!clean) return "";
+
+  // 管理密钥只允许发送到 HTTPS；HTTP 仅保留给同机开发服务。
+  // 同时拒绝 userinfo、路径、查询参数和片段，避免密钥被意外转发。
+  const match = clean.match(
+    /^(https?):\/\/(\[[0-9a-f:]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::(\d{1,5}))?$/i
+  );
+  if (!match) throw new Error("CPA 地址必须是纯主机地址，例如 https://host:port");
+  const scheme = match[1].toLowerCase();
+  const hostname = match[2].replace(/^\[|\]$/g, "").toLowerCase();
+  const port = match[3] ? Number(match[3]) : null;
+  if (port != null && (port < 1 || port > 65535)) throw new Error("CPA 端口无效");
+
+  const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  if (scheme !== "https" && !(scheme === "http" && isLoopback)) {
+    throw new Error("CPA 管理密钥只能通过 HTTPS 发送（localhost 可使用 HTTP）");
+  }
+  return clean;
 }
 
 function cacheScope(cfg) {
@@ -155,13 +188,24 @@ async function configureInteractive(cfg) {
     "CPA",
     "CLI Proxy API 管理端地址。SuperGrok / ChatGPT / Google 的认证都从这里读。",
     "https://host:port",
-    cfg.cpaBaseUrl || "https://cpa.990226.xyz:50442",
+    cfg.cpaBaseUrl || "",
     false
   );
   if (base == null) return cfg;
   const key = await promptField("CPA", "管理端 API Key", "API Key", "", true);
   if (key == null) return cfg;
-  const clean = base.replace(/\/+$/, "");
+  let clean;
+  try {
+    clean = normalizeCpaBaseUrl(base);
+  } catch (e) {
+    const invalid = new Alert();
+    invalid.title = "CPA 地址无效";
+    invalid.message = String(e.message || e);
+    invalid.addCancelAction("返回");
+    await invalid.present();
+    return cfg;
+  }
+  if (!clean) return cfg;
   if (clean) Keychain.set(KEY.cpaBase, clean);
   if (key) Keychain.set(KEY.cpaKey, key);
   cfg.cpaBaseUrl = clean || cfg.cpaBaseUrl;
@@ -318,13 +362,15 @@ async function loadJSON(url, opts = {}) {
 
 // ---------- CPA ----------
 async function cpaGet(baseUrl, apiKey, path) {
-  return loadJSON(`${baseUrl}/v0/management${path}`, {
+  const trustedBaseUrl = normalizeCpaBaseUrl(baseUrl);
+  return loadJSON(`${trustedBaseUrl}/v0/management${path}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
 }
 
 async function cpaApiCall(baseUrl, apiKey, body) {
-  return loadJSON(`${baseUrl}/v0/management/api-call`, {
+  const trustedBaseUrl = normalizeCpaBaseUrl(baseUrl);
+  return loadJSON(`${trustedBaseUrl}/v0/management/api-call`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -1003,7 +1049,9 @@ async function main() {
   }
 
   if (!hasAnyAuth(cfg)) {
-    const w = buildError("尚未配置。请在 Scriptable 内运行本脚本，填写 CPA 地址与 API Key。");
+    const w = buildError(
+      cfg.configError || "尚未配置。请在 Scriptable 内运行本脚本，填写 CPA 地址与 API Key。"
+    );
     if (config.runsInWidget) Script.setWidget(w);
     else await w.presentMedium();
     return;

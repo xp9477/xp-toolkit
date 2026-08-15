@@ -24,7 +24,7 @@ class Color {
 const context = vm.createContext({ Color, console });
 vm.runInContext(
   `${source.slice(0, end)}\n` +
-    "globalThis.testApi = { hasAnyAuth, cacheScope, authIndexOf, " +
+    "globalThis.testApi = { hasAnyAuth, normalizeCpaBaseUrl, cacheScope, authIndexOf, " +
     "normalizeUsageWindow, parseChatGPTUsage, parseAntigravity };",
   context
 );
@@ -38,6 +38,21 @@ test("configuration requires both CPA address and key", () => {
   assert.equal(api.hasAnyAuth({ cpaBaseUrl: "", cpaApiKey: "key" }), false);
   assert.equal(
     api.hasAnyAuth({ cpaBaseUrl: "https://cpa.example", cpaApiKey: "" }),
+    false
+  );
+});
+
+test("CPA management key is restricted to trusted transports", () => {
+  assert.equal(
+    api.normalizeCpaBaseUrl("https://cpa.example:50442/"),
+    "https://cpa.example:50442"
+  );
+  assert.equal(api.normalizeCpaBaseUrl("http://127.0.0.1:8080"), "http://127.0.0.1:8080");
+  assert.throws(() => api.normalizeCpaBaseUrl("http://cpa.example"), /HTTPS/);
+  assert.throws(() => api.normalizeCpaBaseUrl("https://user@cpa.example"), /纯主机地址/);
+  assert.throws(() => api.normalizeCpaBaseUrl("https://cpa.example/path"), /纯主机地址/);
+  assert.equal(
+    api.hasAnyAuth({ cpaBaseUrl: "http://cpa.example", cpaApiKey: "secret" }),
     false
   );
 });
