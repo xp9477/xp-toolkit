@@ -13,6 +13,13 @@ import notify
 import requests
 from common import require_fields, run_account_scripts
 
+API_ORIGIN = "https://iosyc.com"
+REQUEST_TIMEOUT = (10, 30)
+ALREADY_SIGNED_PATTERN = re.compile(
+    r"(?:您)?(?:(?:今日|今天)(?:已经|已)?签到(?:过)?(?:了)?|"
+    r"(?:已经|已)签到(?:过)?(?:了)?|签到过了)[！!。.]?"
+)
+
 
 class Script:
     """脚本基类"""
@@ -27,16 +34,43 @@ class Script:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
         }
 
+    def _request(self, method: str, path: str, **kwargs):
+        """请求固定 HTTPS 根地址，并拒绝重定向到未信任主机。"""
+        if not path.startswith("/") or path.startswith("//") or "://" in path:
+            raise ValueError("雨辰 IOS API 路径不合法")
+        response = self.session.request(
+            method,
+            f"{API_ORIGIN}{path}",
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
+            verify=True,
+            **kwargs,
+        )
+        response.raise_for_status()
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(f"雨辰 IOS 服务返回非成功状态: {response.status_code}")
+        return response
+
+    @staticmethod
+    def _json_object(response, operation: str) -> dict:
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ValueError(f"{operation}响应不是有效 JSON") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"{operation}响应格式异常")
+        return payload
+
     def get_token(self):
         """获取登录 token"""
-        url = "https://iosyc.com/login?r=https%3A%2F%2Fiosyc.com%2F"
-        resp = self.session.get(url)
-        token = re.search(r'name="token" value="(.+)"', resp.text).group(1)
-        return token
+        resp = self._request("GET", "/login?r=https%3A%2F%2Fiosyc.com%2F")
+        token_match = re.search(r'name="token" value="([^"]+)"', resp.text)
+        if not token_match:
+            raise ValueError("登录页缺少 token，页面结构或登录流程可能已变化")
+        return token_match.group(1)
 
     def login(self, token):
         """登录"""
-        url = "https://iosyc.com/wp-admin/admin-ajax.php"
         data = {
             "user_login": self.username,
             "password": self.password,
@@ -44,29 +78,52 @@ class Script:
             "action": "userlogin_form",
             "token": token,
         }
-        resp = self.session.post(url, data=data)
-        result = resp.json()
-        print(result)
-        return result.get("success") == "success"
+        resp = self._request("POST", "/wp-admin/admin-ajax.php", data=data)
+        result = self._json_object(resp, "登录")
+        success = result.get("success") == "success"
+        print("登录成功" if success else "登录业务响应未确认成功")
+        return success
 
     def daily_sign(self):
         """每日签到"""
-        url = "https://iosyc.com/wp-admin/admin-ajax.php"
         data = {
             "action": "daily_sign",
         }
-        resp = self.session.post(url, data=data)
-        result = resp.json()
-        print(result)
-        return result
+        resp = self._request("POST", "/wp-admin/admin-ajax.php", data=data)
+        result = self._json_object(resp, "签到")
+
+        success_value = result.get("success")
+        status_value = result.get("status")
+        message = next(
+            (
+                result[key]
+                for key in ("message", "msg")
+                if isinstance(result.get(key), str)
+            ),
+            "",
+        )
+        succeeded = (
+            success_value is True
+            or (isinstance(success_value, str) and success_value in {"success", "ok"})
+            or (isinstance(status_value, int) and status_value == 1)
+            or (
+                isinstance(status_value, str) and status_value in {"1", "success", "ok"}
+            )
+        )
+        already_signed = bool(ALREADY_SIGNED_PATTERN.fullmatch(message.strip()))
+        if not succeeded and not already_signed:
+            print("签到业务响应未确认成功")
+            return False
+        print("签到成功" if succeeded else "今日已签到")
+        return True
 
     def get_user_info(self):
         """获取用户信息"""
-        url = "https://iosyc.com/users?tab=credit"
-        resp = self.session.get(url)
-        credit = re.search(
-            r'您目前可用积分： (.+)</div><div class="weixin', resp.text
-        ).group(1)
+        resp = self._request("GET", "/users?tab=credit")
+        credit_match = re.search(r"您目前可用积分：\s*([^<]+)", resp.text)
+        if not credit_match:
+            raise ValueError("积分页面缺少积分字段，页面结构或登录状态可能已变化")
+        credit = credit_match.group(1).strip()
         print(f"积分：{credit}")
         return credit
 
@@ -85,12 +142,11 @@ class Script:
                 return False
 
             # 每日签到
-            self.daily_sign()
+            if not self.daily_sign():
+                return False
 
             # 获取用户信息
-            self.get_user_info()
-
-            return True
+            return bool(self.get_user_info())
         except Exception as e:
             print(f"执行失败 - {user_info}, 错误: {e}")
             raise

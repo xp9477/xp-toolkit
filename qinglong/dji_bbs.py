@@ -9,10 +9,16 @@ env:
 
 import re
 import time
+from urllib.parse import urlparse
 
 import notify
 import requests
 from common import require_fields, run_account_scripts
+
+DJI_ORIGIN = "https://bbs.dji.com"
+POETRY_ORIGIN = "https://v1.jinrishici.com"
+REQUEST_TIMEOUT = (10, 30)
+ALLOWED_HOSTS = {"bbs.dji.com", "v1.jinrishici.com"}
 
 
 class Script:
@@ -25,6 +31,47 @@ class Script:
         require_fields(account, "cookie")
         self.session = requests.Session()
 
+    def _request(self, method: str, url: str, **kwargs):
+        """只请求预期的 HTTPS 主机，并拒绝携带凭据跨站重定向。"""
+        parsed = urlparse(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in ALLOWED_HOSTS
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in {None, 443}
+        ):
+            raise ValueError("请求地址不在大疆签到脚本的信任边界内")
+        request_headers = kwargs.get("headers", {})
+        sensitive_headers = {"authorization", "cookie", "x-csrf-token"}
+        if parsed.hostname != "bbs.dji.com" and any(
+            str(name).lower() in sensitive_headers for name in request_headers
+        ):
+            raise ValueError("不能把大疆凭据发送到第三方服务")
+
+        response = self.session.request(
+            method,
+            url,
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
+            verify=True,
+            **kwargs,
+        )
+        response.raise_for_status()
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(f"服务返回非成功状态: {response.status_code}")
+        return response
+
+    @staticmethod
+    def _json_object(response, operation: str) -> dict:
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ValueError(f"{operation}响应不是有效 JSON") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"{operation}响应格式异常")
+        return payload
+
     def run(self):
         """执行脚本逻辑"""
         user_info = f"用户: {self.username}" if self.username else "账号"
@@ -36,20 +83,12 @@ class Script:
             "Cookie": self.cookie,
         }
 
-        # 请求1: 获取formhash (5分)
-        r1 = self.session.get("https://bbs.dji.com/", headers=headers)
-        if r1.status_code != 200:
-            print(f"请求失败，状态码: {r1.status_code}")
-            return False
+        # 请求1: 访问首页并确认登录状态 (5分)
+        r1 = self._request("GET", f"{DJI_ORIGIN}/", headers=headers)
 
         if "<span>登录</span>" in r1.text:
             print("未登录")
             return False
-
-        formhash_match = re.search(r'name="formhash" value="(.+)"', r1.text)
-        if formhash_match:
-            formhash = formhash_match.group(1)
-            print(f"获取formhash: {formhash}")
 
         # 请求2: 签到 (2分)
         headers2 = {
@@ -58,25 +97,22 @@ class Script:
             "User-Agent": headers["User-Agent"],
             "Cookie": self.cookie,
         }
-        r2 = self.session.post(
-            "https://bbs.dji.com/api/v2/home/paulsigns/sign?device=desktop",
+        r2 = self._request(
+            "POST",
+            f"{DJI_ORIGIN}/api/v2/home/paulsigns/sign?device=desktop",
             headers=headers2,
         )
-        if r2.status_code != 200:
-            print(f"签到请求失败，状态码: {r2.status_code}")
-            return False
 
         if "您需要先登录才能继续本操作" in r2.text:
             print("需要登录")
             return False
 
-        success_match = re.search(r'"success":\s*(\w+)', r2.text)
-        increased_match = re.search(r'"increased":\s*(\d+)', r2.text)
-
-        success = success_match.group(1) if success_match else ""
-        increased = increased_match.group(1) if increased_match else ""
-
-        print(f"成功：{success}；增长：{increased}")
+        sign_payload = self._json_object(r2, "签到")
+        if sign_payload.get("success") is not True:
+            print("签到业务响应未确认成功")
+            return False
+        increased = sign_payload.get("increased")
+        print(f"签到成功；增长：{increased if increased is not None else '未知'}")
 
         # 请求3: 访问其他用户空间（5分）
         users = [
@@ -93,18 +129,13 @@ class Script:
         ]
 
         for user in users:
-            r3 = self.session.get(user, headers=headers)
-            if r3.status_code != 200:
-                print(f"访问用户主页失败，状态码: {r3.status_code}")
-                return False
+            self._request("GET", user, headers=headers)
             print(f"访问用户主页成功: {user}")
             time.sleep(1)
 
         # 请求4: 回复帖子（5 分）
         # 使用 session，高度还原curl请求
-        reply_url = (
-            "https://bbs.dji.com/api/v2/forum/thread/341362/reply?device=desktop"
-        )
+        reply_url = f"{DJI_ORIGIN}/api/v2/forum/thread/341362/reply?device=desktop"
         reply_headers = {
             "accept": "application/json, text/plain, */*",
             "content-type": "application/json",
@@ -119,43 +150,51 @@ class Script:
         for i in range(5):
             # 获取古诗词文案并作为 message
             try:
-                gushici_resp = self.session.get(
-                    "https://v1.jinrishici.com/all.txt", timeout=5
+                gushici_resp = self._request(
+                    "GET",
+                    f"{POETRY_ORIGIN}/all.txt",
                 )
-                if gushici_resp.status_code == 200:
-                    gushici_message = gushici_resp.text.strip()
-                else:
-                    gushici_message = "."
-            except Exception:
+                gushici_message = gushici_resp.text.strip() or "."
+            except (requests.RequestException, RuntimeError, ValueError):
                 gushici_message = "."
 
-            r4 = self.session.post(
+            r4 = self._request(
+                "POST",
                 reply_url,
                 headers=reply_headers,
                 json={"message": gushici_message},
             )
-            if r4.status_code != 200:
-                print(f"回复帖子失败，状态码: {r4.status_code}，响应内容: {r4.text}")
+            reply_payload = self._json_object(r4, "回复帖子")
+            if reply_payload.get("success") is not True:
+                print("回复帖子业务响应未确认成功")
                 return False
             print(f"回复帖子成功: {i + 1}")
             time.sleep(1)
 
         # 请求 5：查看可兑换积分和余额
-        r5 = self.session.get(
-            "https://bbs.dji.com/home.php?mod=spacecp&ac=credit&op=widthdraw",
+        r5 = self._request(
+            "GET",
+            f"{DJI_ORIGIN}/home.php?mod=spacecp&ac=credit&op=widthdraw",
             headers=headers,
         )
-        r6 = self.session.get(
-            "https://bbs.dji.com/misc.php?mod=dji_credit", headers=headers
+        r6 = self._request(
+            "GET",
+            f"{DJI_ORIGIN}/misc.php?mod=dji_credit",
+            headers=headers,
         )
-        if r5.status_code != 200 or r6.status_code != 200:
-            print("查看可兑换积分和余额失败")
-            return False
         credit = re.search(r"<span>未兑换：(\d+)分</span>", r5.text)
-        balance = r6.json()["data"]["dji_credit_rmb"]
-        print(f"未兑换积分：{credit.group(1) if credit else '未找到'}")
-        print(f"余额：{str(balance) if balance else '未找到'}")
-        return bool(balance)
+        balance_payload = self._json_object(r6, "余额查询")
+        balance_data = balance_payload.get("data")
+        if not credit or not isinstance(balance_data, dict):
+            print("积分或余额响应格式异常")
+            return False
+        if "dji_credit_rmb" not in balance_data:
+            print("余额响应缺少必要字段")
+            return False
+        balance = balance_data["dji_credit_rmb"]
+        print(f"未兑换积分：{credit.group(1)}")
+        print(f"余额：{balance}")
+        return True
 
 
 def main() -> int:
