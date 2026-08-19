@@ -4,8 +4,8 @@ cron: 0 * * * *
 description: 监控 TP-Link AP 在线数量
 
 env:
-- `monitor_tplink_AP`: {"url": "https://ap.local", "username": "...", "password": "...", "expected_count": 4}
-- 自签证书推荐配置 `"ca_bundle":"/path/device-ca.pem"`；仅迁移期可显式配置 `"verify_tls":false`
+- `monitor_tplink_AP`: {"url": "http://ap.local", "username": "...", "password": "...", "expected_count": 4}
+- 内网设备默认兼容 HTTP/自签证书；可配置 `"verify_tls":true` 或 `"ca_bundle":"/path/device-ca.pem"`
 """
 
 import notify
@@ -19,7 +19,7 @@ def load_monitor_config():
         raise ValueError("monitor_tplink_AP 配置必须为 JSON 对象")
 
     verify_tls = parse_bool(
-        config.get("verify_tls"), default=True, field_name="verify_tls"
+        config.get("verify_tls"), default=False, field_name="verify_tls"
     )
     ca_bundle = str(config.get("ca_bundle") or "").strip()
     url = validate_service_origin(
@@ -33,9 +33,6 @@ def load_monitor_config():
 
     if not username or not password:
         raise ValueError("monitor_tplink_AP 配置缺少 username/password")
-    if ca_bundle and not verify_tls:
-        raise ValueError("ca_bundle 与 verify_tls=false 不能同时使用")
-
     return {
         "url": url,
         "username": username,
@@ -49,7 +46,7 @@ def main():
     config = load_monitor_config()
     base_url = config["url"]
     if config["verify"] is False:
-        print("警告: 已显式关闭 TP-Link TLS 校验，管理员凭据可能被窃取")
+        print("提示: TP-Link 使用内网兼容模式，未校验证书")
 
     headers = {
         "Accept": "text/plain, */*; q=0.01",

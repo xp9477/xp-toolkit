@@ -31,11 +31,13 @@ class FakeSession:
         final_text: str,
         verify_text: str = "",
         first_error: Exception | None = None,
+        login_text: str = "欢迎您回来",
     ):
         self.headers = {}
         self.final_text = final_text
         self.first_error = first_error
         self.verify_text = verify_text
+        self.login_text = login_text
         self.get_count = 0
 
     def get(self, _url, **_kwargs):
@@ -51,7 +53,7 @@ class FakeSession:
         return FakeResponse(self.verify_text)
 
     def post(self, _url, **_kwargs):
-        return FakeResponse("欢迎您回来")
+        return FakeResponse(self.login_text)
 
 
 def make_script(session: FakeSession) -> mt_forum.Script:
@@ -79,6 +81,18 @@ class MtForumResponseTests(unittest.TestCase):
         session = FakeSession(final_text="<![CDATA[签到成功，获得奖励]]>")
 
         self.assertTrue(make_script(session).run())
+
+    def test_changed_login_success_copy_does_not_cause_a_false_failure(self):
+        session = FakeSession(final_text="<![CDATA[签到成功]]>", login_text="跳转中")
+
+        self.assertTrue(make_script(session).run())
+
+    def test_explicit_password_error_still_stops_before_signing(self):
+        session = FakeSession(final_text="", login_text="密码错误")
+
+        with self.assertRaisesRegex(RuntimeError, "登录失败"):
+            make_script(session).run()
+        self.assertEqual(session.get_count, 1)
 
     def test_http_failure_aborts_before_parsing_page(self):
         session = FakeSession(

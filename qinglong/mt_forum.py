@@ -35,6 +35,19 @@ class Script:
         )
 
     @staticmethod
+    def _formhash(text: str) -> str | None:
+        patterns = (
+            r"formhash=([a-zA-Z0-9]+)",
+            r"""name=["']formhash["'][^>]*value=["']([^"']+)["']""",
+            r"""value=["']([^"']+)["'][^>]*name=["']formhash["']""",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
+    @staticmethod
     def _fail(message: str):
         print(message)
         raise RuntimeError(message)
@@ -59,12 +72,9 @@ class Script:
         except Exception as e:
             self._fail(f"访问登录页面失败: {e}")
 
-        formhash_match = re.search(r"formhash=([a-zA-Z0-9]+)", r1.text) or re.search(
-            r'name="formhash"\s+value="([a-zA-Z0-9]+)"', r1.text
-        )
-        if not formhash_match:
+        formhash = self._formhash(r1.text)
+        if not formhash:
             self._fail("登录页面未找到 formhash")
-        formhash = formhash_match.group(1)
 
         # 2. 提交登录表单
         payload = {
@@ -89,12 +99,15 @@ class Script:
         except Exception as e:
             self._fail(f"提交登录失败: {e}")
 
-        # 验证是否登录成功
-        if (
-            "欢迎您回来" not in r2.text
-            and "登录成功" not in r2.text
-            and "现在将转入" not in r2.text
-        ):
+        # Discuz 各版本登录成功文案不一致，只在出现明确失败文案时中止。
+        login_failures = (
+            "密码错误",
+            "密码不正确",
+            "用户不存在",
+            "用户名不存在",
+            "登录失败",
+        )
+        if any(marker in r2.text for marker in login_failures):
             cdata_match = re.search(r"<!\[CDATA\[(.*?)\]\]>", r2.text, re.DOTALL)
             msg_raw = cdata_match.group(1) if cdata_match else "未知原因"
             msg_no_html = re.sub(
@@ -109,7 +122,7 @@ class Script:
             msg = " | ".join(login_lines) if login_lines else "未知原因"
             self._fail(f"登录失败: {msg}")
 
-        print("登录成功")
+        print("登录请求已提交")
 
         # 3. 访问签到页获取当前 Session 的新 formhash，并判断是否已签到
         try:
@@ -122,15 +135,14 @@ class Script:
             self._fail(f"访问签到页面失败: {e}")
 
         if self._signed_page(r3.text):
+            print("登录成功")
             print("今天已经签到过了")
             return True
 
-        sign_formhash_match = re.search(
-            r"formhash=([a-zA-Z0-9]+)", r3.text
-        ) or re.search(r'name="formhash"\s+value="([a-zA-Z0-9]+)"', r3.text)
-        if not sign_formhash_match:
+        sign_formhash = self._formhash(r3.text)
+        if not sign_formhash:
             self._fail("签到页面未找到 formhash")
-        sign_formhash = sign_formhash_match.group(1)
+        print("登录成功")
 
         # 4. 执行签到 AJAX 请求
         params = {

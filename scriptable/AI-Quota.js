@@ -3,6 +3,7 @@
 // icon-color: brown; icon-glyph: book;
 //
 // AI Quota — SuperGrok / ChatGPT Plus / Google AI Pro
+// Release: 2026-08-19.1
 // 中号组件：系统背景、官方彩色 logo、Notion / Instapaper 排版。
 //
 // 配置（任选，可叠加）：
@@ -139,21 +140,14 @@ function normalizeCpaBaseUrl(value) {
   const clean = String(value || "").trim().replace(/\/+$/, "");
   if (!clean) return "";
 
-  // 管理密钥只允许发送到 HTTPS；HTTP 仅保留给同机开发服务。
-  // 同时拒绝 userinfo、路径、查询参数和片段，避免密钥被意外转发。
+  // 地址由用户明确配置；允许内网常见的 HTTP 部署。
+  // 仍拒绝 userinfo、路径、查询参数和片段，避免密钥被意外转发。
   const match = clean.match(
     /^(https?):\/\/(\[[0-9a-f:]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::(\d{1,5}))?$/i
   );
   if (!match) throw new Error("CPA 地址必须是纯主机地址，例如 https://host:port");
-  const scheme = match[1].toLowerCase();
-  const hostname = match[2].replace(/^\[|\]$/g, "").toLowerCase();
   const port = match[3] ? Number(match[3]) : null;
   if (port != null && (port < 1 || port > 65535)) throw new Error("CPA 端口无效");
-
-  const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-  if (scheme !== "https" && !(scheme === "http" && isLoopback)) {
-    throw new Error("CPA 管理密钥只能通过 HTTPS 发送（localhost 可使用 HTTP）");
-  }
   return clean;
 }
 

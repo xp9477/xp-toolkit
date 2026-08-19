@@ -64,10 +64,10 @@ Clash 与 Quantumult X 文件是生成物。`.github/scripts/sync_rules.py` 负�
 项目处理 cookie、API Key、WebDAV 密码、qBittorrent 删除权限和抓包响应。以下约束属于架构，
 不能由每个新脚本自行决定：
 
-- 携带凭据的远端默认只允许 HTTPS；本机 HTTP 必须是窄化的显式例外。
+- 公网凭据端点建议使用 HTTPS；对用户明确配置的 HTTP 端点保持兼容。
 - URL 与密钥作为不可拆分的凭据对迁移，不能让远端配置只替换 URL。
 - 密钥不进入日志、URL、剪贴板默认导出、网页可读存储或抓包明文产物。
-- 网络错误、非预期 HTTP 状态和响应结构错误都算失败，不能折叠成“空结果”。
+- 核心登录/签到的网络错误、HTTP 失败和明确业务失败都算失败；余额等可选展示字段不应反过来拖垮主任务。
 - 删除操作默认 dry-run；删除数据和删除文件分别授权，并要求可审计的明确确认。
 - 安全检查异常时 fail closed，不以兼容性为由继续执行高风险动作。
 
@@ -80,7 +80,7 @@ Clash 与 Quantumult X 文件是生成物。`.github/scripts/sync_rules.py` 负�
 
 - Direct 与 Proxy 规则不能语义重叠。
 - 生成器遇到未知规则必须报错，不能静默丢弃。
-- 密钥不能通过 HTTP、URL userinfo、日志或 `localStorage` 泄露。
+- 密钥不能发往未明确配置的端点，也不能通过 URL userinfo、日志或 `localStorage` 泄露。
 - 业务失败不能返回成功退出码。
 - API 失败不能被解释为零条记录并触发批量删除。
 - 远端 HTML 不能未经清理进入高权限 DOM。

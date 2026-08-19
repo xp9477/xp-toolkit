@@ -47,7 +47,7 @@ done < <(find scriptable userscripts proxy/loon/script -type f -name '*.js' -pri
 
 - 从 `template.py` 和 `common.py` 的入口模式开始，不自行实现另一套账号配置协议。
 - 用严格布尔解析；不要使用 `bool("false")` 一类隐式真值。
-- 携带凭据的服务根地址默认只允许 HTTPS，不允许 userinfo、路径、查询或片段。
+- 公网凭据端点建议 HTTPS；用户明确配置的 HTTP 端点可保持兼容。服务根地址不允许 userinfo、路径、查询或片段。
 - `run()` 仅在业务成功已得到证实时返回 `True`。
 - 删除、覆盖或批量变更默认 dry-run，并将“执行动作”和“删除关联数据”拆成独立授权。
 

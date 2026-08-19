@@ -37,7 +37,7 @@ ChatGPT 不要按 `primary_window = 5 小时` 硬套。2026 年 7 月起 Plus / 
 
 **不要把真实 Token / Cookie 提交进仓库。**
 
-CPA 地址默认只接受 HTTPS；仅 `localhost`、`127.0.0.1` 和 `::1` 可显式使用 HTTP。地址不能包含
+CPA 地址支持 HTTP 和 HTTPS（公网部署建议使用 HTTPS）。地址不能包含
 用户名、密码、路径、查询或片段，避免管理 Key 被转发到非预期目标。小组件参数会包含明文 Key，只有在
 设备与 Scriptable 配置可信时才使用；优先选择 Keychain。
 

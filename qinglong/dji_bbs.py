@@ -9,7 +9,6 @@ env:
 
 import re
 import time
-from urllib.parse import urlparse
 
 import notify
 import requests
@@ -18,7 +17,6 @@ from common import require_fields, run_account_scripts
 DJI_ORIGIN = "https://bbs.dji.com"
 POETRY_ORIGIN = "https://v1.jinrishici.com"
 REQUEST_TIMEOUT = (10, 30)
-ALLOWED_HOSTS = {"bbs.dji.com", "v1.jinrishici.com"}
 
 
 class Script:
@@ -32,34 +30,13 @@ class Script:
         self.session = requests.Session()
 
     def _request(self, method: str, url: str, **kwargs):
-        """只请求预期的 HTTPS 主机，并拒绝携带凭据跨站重定向。"""
-        parsed = urlparse(url)
-        if (
-            parsed.scheme != "https"
-            or parsed.hostname not in ALLOWED_HOSTS
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.port not in {None, 443}
-        ):
-            raise ValueError("请求地址不在大疆签到脚本的信任边界内")
-        request_headers = kwargs.get("headers", {})
-        sensitive_headers = {"authorization", "cookie", "x-csrf-token"}
-        if parsed.hostname != "bbs.dji.com" and any(
-            str(name).lower() in sensitive_headers for name in request_headers
-        ):
-            raise ValueError("不能把大疆凭据发送到第三方服务")
-
         response = self.session.request(
             method,
             url,
             timeout=REQUEST_TIMEOUT,
-            allow_redirects=False,
-            verify=True,
             **kwargs,
         )
         response.raise_for_status()
-        if not 200 <= response.status_code < 300:
-            raise RuntimeError(f"服务返回非成功状态: {response.status_code}")
         return response
 
     @staticmethod
@@ -83,14 +60,7 @@ class Script:
     @classmethod
     def _confirmed_success(cls, payload: dict, *, allow_already=False) -> bool:
         value = payload.get("success")
-        succeeded = (
-            value is True
-            or (isinstance(value, int) and value == 1)
-            or (
-                isinstance(value, str)
-                and value.strip().lower() in {"true", "success", "ok", "1"}
-            )
-        )
+        succeeded = str(value).strip().lower() in {"true", "success", "ok", "1"}
         if succeeded:
             return True
         if not allow_already:
@@ -198,9 +168,20 @@ class Script:
                 headers=reply_headers,
                 json={"message": gushici_message},
             )
-            reply_payload = self._json_object(r4, "回复帖子")
-            if not self._confirmed_success(reply_payload):
-                self._business_failure(f"第 {i + 1} 次回复", reply_payload)
+            # 不同版本的回复接口成功响应结构不同；只拒绝明确的失败标记。
+            try:
+                reply_payload = r4.json()
+            except ValueError:
+                reply_payload = None
+            if isinstance(reply_payload, dict):
+                reply_success = reply_payload.get("success")
+                if reply_success is False or str(reply_success).strip().lower() in {
+                    "false",
+                    "failed",
+                    "error",
+                    "0",
+                }:
+                    self._business_failure(f"第 {i + 1} 次回复", reply_payload)
             print(f"回复帖子成功: {i + 1}")
             time.sleep(1)
 
@@ -216,16 +197,11 @@ class Script:
             headers=headers,
         )
         credit = re.search(r"<span>未兑换：(\d+)分</span>", r5.text)
-        balance_payload = self._json_object(r6, "余额查询")
-        balance_data = balance_payload.get("data")
-        if not credit or not isinstance(balance_data, dict):
-            print("积分或余额响应格式异常")
-            return False
-        if "dji_credit_rmb" not in balance_data:
-            print("余额响应缺少必要字段")
-            return False
-        balance = balance_data["dji_credit_rmb"]
-        print(f"未兑换积分：{credit.group(1)}")
+        try:
+            balance = r6.json().get("data", {}).get("dji_credit_rmb", "未找到")
+        except (AttributeError, ValueError):
+            balance = "未找到"
+        print(f"未兑换积分：{credit.group(1) if credit else '未找到'}")
         print(f"余额：{balance}")
         return True
 

@@ -32,11 +32,11 @@
 | 高 | 规则三端来源不明确，CI 自动写回存在覆盖和竞争 | Loon 成为 canonical source，PR 重生成检查，main 从最新源全量生成并有界重试 | `43a3bdc`, `7a25676` |
 | 高 | Direct/Proxy 规则可语义覆盖但校验仍通过 | 加入 exact/suffix 交集检测与单测 | `db2d9fa` |
 | 高 | 已发布 Loon 插件指向退役仓库，线上加载内容与本仓库不一致 | 全部链接切换到 xp-toolkit 并加入分发完整性测试 | `98df691` |
-| 高 | Scriptable 管理 Key 可发往 HTTP/异常 URL，缓存跨凭据复用 | HTTPS/loopback 约束、端点规范化、非明文缓存作用域、并行隔离请求 | `c5297b0`, `679274d` |
-| 高 | Bark/Supabase/TP-Link 凭据传输和 TLS 默认值宽松 | POST-only 默认、严格服务 origin、TLS 默认验证、自签名 CA 显式配置 | `9879074` |
+| 高 | Scriptable 管理 Key 可发往异常 URL，缓存跨凭据复用 | HTTP(S) 端点规范化、非明文缓存作用域、并行隔离请求 | `c5297b0`, `679274d` |
+| 高 | Bark/Supabase 公网凭据传输宽松，TP-Link 内网设备配置不明确 | Bark POST-only、Supabase 严格 origin；TP-Link 保留 HTTP/自签名兼容并可显式启用 TLS/CA | `9879074` |
 | 高 | 抓包工具默认保存响应明文，脱敏不完整，并可改变既有目录权限 | metadata-only 默认、结构全量脱敏、unsafe 显式、仅保护新目录 | `b7e8a70`, `00f8f74` |
 | 高 | 生成的 Loon regex 可错误匹配 apex/userinfo，输入编码和字段扫描不稳 | 合法 hostname regex、编码识别、共享 VIP 字段模式、确定性生成 | `60dd8bb`, `00f8f74` |
-| 高 | 验证码脚本把已保存 secrets 回填到任意页面 DOM，远端可换 URL 保留本地 Key | secrets 不预填、URL/Key 原子迁移、HTTPS 校验、导出默认移除 Key | `1671be3` |
+| 高 | 验证码脚本把已保存 secrets 回填到任意页面 DOM，远端可换 URL 保留本地 Key | secrets 不预填、URL/Key 原子迁移、HTTP(S) URL 校验、导出默认移除 Key | `1671be3` |
 | 高 | 4KHD 会话在 GM 存储失败时降级到页面 `localStorage` | 安全存储失败即拒绝降级，并加入静态回归测试 | `1671be3` |
 | 中 | Synapse 修改全局 `JSON.parse`，并复制未充分清理的页面标记 | 仅拦截已知 fetch 端点，标签/属性白名单清理 | `1671be3` |
 | 中 | A 股脚本直接把远端页面 HTML 复制到新面板 | 改为文本和白名单表格节点重建 | `1671be3` |

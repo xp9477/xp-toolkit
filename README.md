@@ -73,5 +73,5 @@ python3 .github/scripts/check_rules.py
 
 - 不要提交 cookie、token、`.env` 等敏感信息
 - 抓包产物 `mitm_responses/` 默认忽略，不入库
-- 携带凭据的远端默认必须使用 HTTPS；本机 HTTP 例外需显式配置
+- 公网凭据端点建议使用 HTTPS；用户明确配置的 HTTP 端点保持兼容
 - 删除类任务默认 dry-run，并把数据删除和文件删除分开授权

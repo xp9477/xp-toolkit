@@ -25,7 +25,7 @@ function captchaSecurityApi() {
   return context.testApi;
 }
 
-test("captcha backend credentials only use trusted transports", () => {
+test("captcha backend accepts explicit HTTP and HTTPS endpoints", () => {
   const api = captchaSecurityApi();
   assert.equal(
     api.completionUrl("https://vision.example/v1/"),
@@ -35,7 +35,10 @@ test("captcha backend credentials only use trusted transports", () => {
     api.completionUrl("http://127.0.0.1:8080/v1"),
     "http://127.0.0.1:8080/v1/chat/completions"
   );
-  assert.throws(() => api.completionUrl("http://vision.example/v1"), /HTTPS/);
+  assert.equal(
+    api.completionUrl("http://192.168.1.20:8080/v1"),
+    "http://192.168.1.20:8080/v1/chat/completions"
+  );
   assert.throws(() => api.completionUrl("https://user@vision.example/v1"), /不能包含/);
   assert.throws(() => api.completionUrl("https://vision.example/v1?target=evil"), /不能包含/);
 });

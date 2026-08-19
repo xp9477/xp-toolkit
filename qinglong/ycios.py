@@ -15,10 +15,6 @@ from common import require_fields, run_account_scripts
 
 API_ORIGIN = "https://iosyc.com"
 REQUEST_TIMEOUT = (10, 30)
-ALREADY_SIGNED_PATTERN = re.compile(
-    r"(?:您)?(?:(?:今日|今天)(?:已经|已)?签到(?:过)?(?:了)?|"
-    r"(?:已经|已)签到(?:过)?(?:了)?|签到过了)[！!。.]?"
-)
 
 
 class Script:
@@ -35,20 +31,13 @@ class Script:
         }
 
     def _request(self, method: str, path: str, **kwargs):
-        """请求固定 HTTPS 根地址，并拒绝重定向到未信任主机。"""
-        if not path.startswith("/") or path.startswith("//") or "://" in path:
-            raise ValueError("雨辰 IOS API 路径不合法")
         response = self.session.request(
             method,
             f"{API_ORIGIN}{path}",
             timeout=REQUEST_TIMEOUT,
-            allow_redirects=False,
-            verify=True,
             **kwargs,
         )
         response.raise_for_status()
-        if not 200 <= response.status_code < 300:
-            raise RuntimeError(f"雨辰 IOS 服务返回非成功状态: {response.status_code}")
         return response
 
     @staticmethod
@@ -110,7 +99,10 @@ class Script:
                 isinstance(status_value, str) and status_value in {"1", "success", "ok"}
             )
         )
-        already_signed = bool(ALREADY_SIGNED_PATTERN.fullmatch(message.strip()))
+        already_signed = any(
+            marker in message
+            for marker in ("今日已签", "今天已签", "已经签到", "签到过了")
+        )
         if not succeeded and not already_signed:
             print("签到业务响应未确认成功")
             return False
@@ -146,7 +138,11 @@ class Script:
                 return False
 
             # 获取用户信息
-            return bool(self.get_user_info())
+            try:
+                self.get_user_info()
+            except ValueError as e:
+                print(f"积分信息读取失败（不影响签到）: {e}")
+            return True
         except Exception as e:
             print(f"执行失败 - {user_info}, 错误: {e}")
             raise

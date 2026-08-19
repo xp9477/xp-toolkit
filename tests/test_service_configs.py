@@ -33,29 +33,24 @@ class TpLinkConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {"monitor_tplink_AP": config}, clear=True):
             return monitor_tplink_AP.load_monitor_config()
 
-    def test_tls_verification_is_on_by_default(self):
+    def test_lan_compatibility_is_the_default(self):
         config = self.load(
-            '{"url":"https://ap.local","username":"admin","password":"secret"}'
-        )
-        self.assertIs(config["verify"], True)
-
-    def test_plain_http_requires_explicit_insecure_migration_flag(self):
-        with self.assertRaises(common.ConfigError):
-            self.load(
-                '{"url":"http://ap.local","username":"admin","password":"secret"}'
-            )
-        config = self.load(
-            '{"url":"http://ap.local","username":"admin","password":"secret",'
-            '"verify_tls":false}'
+            '{"url":"http://ap.local","username":"admin","password":"secret"}'
         )
         self.assertIs(config["verify"], False)
 
-    def test_custom_ca_and_disabled_verification_are_mutually_exclusive(self):
-        with self.assertRaises(ValueError):
-            self.load(
-                '{"url":"https://ap.local","username":"admin","password":"secret",'
-                '"verify_tls":false,"ca_bundle":"/tmp/device-ca.pem"}'
-            )
+    def test_tls_or_a_custom_ca_can_be_enabled(self):
+        config = self.load(
+            '{"url":"https://ap.local","username":"admin","password":"secret",'
+            '"verify_tls":true}'
+        )
+        self.assertIs(config["verify"], True)
+
+        config = self.load(
+            '{"url":"https://ap.local","username":"admin","password":"secret",'
+            '"ca_bundle":"/tmp/device-ca.pem"}'
+        )
+        self.assertEqual(config["verify"], "/tmp/device-ca.pem")
 
 
 if __name__ == "__main__":

@@ -42,19 +42,17 @@ test("configuration requires both CPA address and key", () => {
   );
 });
 
-test("CPA management key is restricted to trusted transports", () => {
+test("CPA address accepts explicit HTTP and HTTPS endpoints", () => {
   assert.equal(
     api.normalizeCpaBaseUrl("https://cpa.example:50442/"),
     "https://cpa.example:50442"
   );
   assert.equal(api.normalizeCpaBaseUrl("http://127.0.0.1:8080"), "http://127.0.0.1:8080");
-  assert.throws(() => api.normalizeCpaBaseUrl("http://cpa.example"), /HTTPS/);
+  assert.equal(api.normalizeCpaBaseUrl("http://192.168.1.20:50442"), "http://192.168.1.20:50442");
+  assert.equal(api.normalizeCpaBaseUrl("http://cpa.internal"), "http://cpa.internal");
   assert.throws(() => api.normalizeCpaBaseUrl("https://user@cpa.example"), /纯主机地址/);
   assert.throws(() => api.normalizeCpaBaseUrl("https://cpa.example/path"), /纯主机地址/);
-  assert.equal(
-    api.hasAnyAuth({ cpaBaseUrl: "http://cpa.example", cpaApiKey: "secret" }),
-    false
-  );
+  assert.equal(api.hasAnyAuth({ cpaBaseUrl: "http://cpa.internal", cpaApiKey: "secret" }), true);
 });
 
 test("cache scope changes without exposing the raw key", () => {

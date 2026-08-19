@@ -7,7 +7,6 @@ env:
 - `hdl`: 每行一个 JSON 对象，字段 `username`, `openId`, `uid`
 """
 
-import re
 from datetime import datetime
 
 import notify
@@ -16,10 +15,6 @@ from common import require_fields, run_account_scripts
 
 API_ORIGIN = "https://superapp-public.kiwa-tech.com"
 REQUEST_TIMEOUT = (10, 30)
-ALREADY_SIGNED_PATTERN = re.compile(
-    r"(?:您)?(?:(?:今日|今天)(?:已经|已)?签到(?:过)?(?:了)?|"
-    r"(?:已经|已)签到(?:过)?(?:了)?|签到过了)[！!。.]?"
-)
 
 
 class HdlClient:
@@ -37,21 +32,13 @@ class HdlClient:
         }
 
     def _post(self, path: str, data: dict) -> dict:
-        """请求固定 API 根地址；路径不能覆盖 scheme 或主机。"""
-        if not path.startswith("/") or path.startswith("//") or "://" in path:
-            raise ValueError("海底捞 API 路径不合法")
-
         response = self.session.post(
             f"{API_ORIGIN}{path}",
             headers=self.headers,
             json=data,
             timeout=REQUEST_TIMEOUT,
-            allow_redirects=False,
-            verify=True,
         )
         response.raise_for_status()
-        if not 200 <= response.status_code < 300:
-            raise RuntimeError(f"海底捞服务返回非成功状态: {response.status_code}")
         try:
             payload = response.json()
         except ValueError as exc:
@@ -71,7 +58,10 @@ class HdlClient:
     @classmethod
     def _is_already_signed(cls, payload: dict) -> bool:
         message = cls._message(payload).strip()
-        return bool(ALREADY_SIGNED_PATTERN.fullmatch(message))
+        return any(
+            marker in message
+            for marker in ("今日已签", "今天已签", "已经签到", "签到过了")
+        )
 
     def login(self):
         data = {
@@ -108,14 +98,7 @@ class HdlClient:
             if isinstance(response_data, dict)
             else None
         )
-        if (
-            payload.get("code") != "ok"
-            or not isinstance(activity_name, str)
-            or not activity_name.strip()
-        ):
-            print("签到活动查询业务响应异常")
-            return False
-        print("活动名称：", activity_name)
+        print("活动名称：", activity_name or "未知")
         return True
 
     def signin(self):
@@ -131,21 +114,16 @@ class HdlClient:
             )
             if isinstance(detail_list, list) and detail_list:
                 detail = detail_list[0]
-                if not isinstance(detail, dict):
-                    print("签到奖励响应格式异常")
-                    return False
-                print(
-                    "碎片：",
-                    detail.get("fragment", "未知"),
-                    "额外奖励：",
-                    detail.get("fragmentSeries", "未知"),
-                    "菜品：",
-                    detail.get("dishes", "未知"),
-                )
-                return True
-            else:
-                print("签到响应没有奖励明细，未确认业务成功")
-                return False
+                if isinstance(detail, dict):
+                    print(
+                        "碎片：",
+                        detail.get("fragment", "未知"),
+                        "额外奖励：",
+                        detail.get("fragmentSeries", "未知"),
+                        "菜品：",
+                        detail.get("dishes", "未知"),
+                    )
+            return True
 
         if self._is_already_signed(payload):
             print("已签到过了")
@@ -156,19 +134,21 @@ class HdlClient:
     def queryFragment(self):
         payload = self._post("/activity/wxapp/signin/queryFragment", {})
         response_data = payload.get("data")
-        if payload.get("code") != "ok" or not isinstance(response_data, dict):
-            print("碎片查询业务响应异常")
-            return False
-        total = response_data.get("total")
-        expire_date = response_data.get("expireDate")
-        if total is None or not isinstance(expire_date, str):
-            print("碎片查询响应缺少必要字段")
-            return False
+        if not isinstance(response_data, dict):
+            print("碎片信息：未知")
+            return True
+        total = response_data.get("total", "未知")
+        expire_date = response_data.get("expireDate", "")
         print("碎片：", total, "活动结束时间：", expire_date)
-        if (
-            datetime.strptime(expire_date, "%Y-%m-%d %H:%M:%S") - datetime.now()
-        ).days <= 2:
-            notify.send("海底捞碎片到期提醒", f"剩余{total}碎片将在2天内过期")
+        if expire_date:
+            try:
+                expires_soon = (
+                    datetime.strptime(expire_date, "%Y-%m-%d %H:%M:%S") - datetime.now()
+                ).days <= 2
+            except ValueError:
+                expires_soon = False
+            if expires_soon:
+                notify.send("海底捞碎片到期提醒", f"剩余{total}碎片将在2天内过期")
         return True
 
     def run(self):

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xptoolkit - 验证码识别填写
 // @namespace    https://github.com/xp9477/xp-toolkit
-// @version      0.1.1
+// @version      0.1.2
 // @description  使用 OpenAI 兼容的视觉模型识别并填写验证码字段。
 // @author       xp9477
 // @match        http://*/*
@@ -200,7 +200,7 @@
           <input name="syncApiKey" type="checkbox">
           <span>同时同步 OpenAI API Key</span>
         </label>
-        <p class="notice warning">WebDAV 凭据始终只保存在当前设备。同步文件目前是 JSON 明文，建议不要同步 OpenAI API Key，并且必须使用 HTTPS。</p>
+        <p class="notice warning">WebDAV 凭据始终只保存在当前设备。同步文件目前是 JSON 明文，建议不要同步 OpenAI API Key；公网地址建议使用 HTTPS。</p>
         <p class="notice">${escapeHtml(syncStatusText())}</p>
       `,
       values: { ...state.sync, password: '' },
@@ -239,9 +239,8 @@
     } catch (error) {
       throw new Error('WebDAV 文件 URL 无效');
     }
-    const localHost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
-    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) {
-      throw new Error('WebDAV 必须使用 HTTPS（本机地址除外）');
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('WebDAV 只支持 HTTP 或 HTTPS');
     }
     if (url.username || url.password) {
       throw new Error('WebDAV URL 不能包含用户名或密码');
@@ -679,9 +678,8 @@
     } catch (error) {
       throw new Error('AI 后端地址无效');
     }
-    const localHost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
-    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) {
-      throw new Error('AI 后端必须使用 HTTPS（本机地址除外）');
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('AI 后端只支持 HTTP 或 HTTPS');
     }
     if (url.username || url.password || url.search || url.hash) {
       throw new Error('AI 后端地址不能包含凭据、查询参数或片段');
