@@ -163,6 +163,21 @@ class ScriptSafetyTests(unittest.TestCase):
         script = qb.Script(self.account(url="http://qb.example", verify_tls=False))
         self.assertEqual(script.url, "http://qb.example")
 
+        script = qb.Script(
+            self.account(url="http://qb.example", allow_insecure_http=True)
+        )
+        self.assertEqual(script.url, "http://qb.example")
+
+    def test_private_and_loopback_http_qb_urls_work_without_tls_flags(self):
+        for url in (
+            "http://192.168.1.20:8080",
+            "http://10.0.0.3",
+            "http://127.0.0.1:8080",
+            "http://qb.local:8080",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(qb.Script(self.account(url=url)).url, url)
+
     def test_file_deletion_requires_a_literal_confirmation(self):
         with self.assertRaisesRegex(ValueError, "delete_files_confirmation"):
             qb.Script(self.account(delete_files=True, dry_run=False))

@@ -72,6 +72,41 @@ class Script:
             raise ValueError(f"{operation}响应格式异常")
         return payload
 
+    @staticmethod
+    def _message(payload: dict) -> str:
+        for key in ("message", "msg", "errorMessage"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return re.sub(r"\s+", " ", value).strip()[:160]
+        return ""
+
+    @classmethod
+    def _confirmed_success(cls, payload: dict, *, allow_already=False) -> bool:
+        value = payload.get("success")
+        succeeded = (
+            value is True
+            or (isinstance(value, int) and value == 1)
+            or (
+                isinstance(value, str)
+                and value.strip().lower() in {"true", "success", "ok", "1"}
+            )
+        )
+        if succeeded:
+            return True
+        if not allow_already:
+            return False
+        message = cls._message(payload)
+        return bool(
+            re.search(
+                r"(?:今日|今天).{0,4}(?:已|已经).{0,3}签|已经签到|已签到", message
+            )
+        )
+
+    @classmethod
+    def _business_failure(cls, operation: str, payload: dict):
+        detail = cls._message(payload) or "服务未返回明确成功标记"
+        raise RuntimeError(f"{operation}失败: {detail}")
+
     def run(self):
         """执行脚本逻辑"""
         user_info = f"用户: {self.username}" if self.username else "账号"
@@ -108,9 +143,8 @@ class Script:
             return False
 
         sign_payload = self._json_object(r2, "签到")
-        if sign_payload.get("success") is not True:
-            print("签到业务响应未确认成功")
-            return False
+        if not self._confirmed_success(sign_payload, allow_already=True):
+            self._business_failure("签到", sign_payload)
         increased = sign_payload.get("increased")
         print(f"签到成功；增长：{increased if increased is not None else '未知'}")
 
@@ -165,9 +199,8 @@ class Script:
                 json={"message": gushici_message},
             )
             reply_payload = self._json_object(r4, "回复帖子")
-            if reply_payload.get("success") is not True:
-                print("回复帖子业务响应未确认成功")
-                return False
+            if not self._confirmed_success(reply_payload):
+                self._business_failure(f"第 {i + 1} 次回复", reply_payload)
             print(f"回复帖子成功: {i + 1}")
             time.sleep(1)
 

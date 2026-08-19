@@ -9,15 +9,18 @@ env:
 - 删除下载文件还必须额外设置 `delete_files_confirmation="DELETE_FILES"`
 - 每个允许删除下载文件的种子还必须带 `允许删除文件` 标签
 - 默认 `verify_tls=true`；仅 qBittorrent 使用自签名证书时显式关闭
+- RFC1918/loopback/`.local` 内网地址可直接使用 HTTP；其他 HTTP 地址需显式设置
+  `allow_insecure_http=true`
 - CookieCloud 默认也要求 HTTPS；无法迁移的旧服务需显式设置
   `cookiecloud_allow_insecure_http=true`
-- 可选: `delete_files`, `verify_tls`, `chdbits_tracker_hosts`,
+- 可选: `delete_files`, `verify_tls`, `allow_insecure_http`, `chdbits_tracker_hosts`,
   `cookiecloud_allow_insecure_http`, `cookiecloud_url`, `cookiecloud_uuid`,
   `cookiecloud_password`, `chdbits_userid`
 """
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -85,6 +88,21 @@ def tracker_hostname(url):
         return normalize_hostname(parsed.hostname)
     except (ValueError, UnicodeError):
         return None
+
+
+def is_private_http_origin(value) -> bool:
+    """内网/本机 qBittorrent 常无 TLS，只对明确的本地地址自动兼容 HTTP。"""
+    try:
+        parsed = urlsplit(str(value or "").strip())
+        if parsed.scheme != "http" or not parsed.hostname:
+            return False
+        hostname = parsed.hostname.rstrip(".").lower()
+        if hostname == "localhost" or hostname.endswith(".local"):
+            return True
+        address = ipaddress.ip_address(hostname)
+        return address.is_private or address.is_loopback or address.is_link_local
+    except (ValueError, TypeError):
+        return False
 
 
 def tracker_hostnames(trackers):
@@ -408,6 +426,12 @@ class Script:
             default=True,
             field_name="verify_tls",
         )
+        self.allow_insecure_http = parse_bool(
+            account.get("allow_insecure_http"),
+            # 兼容已经使用 verify_tls=false 的旧内网配置。
+            default=not self.verify_tls,
+            field_name="allow_insecure_http",
+        )
         self.cookiecloud_allow_insecure_http = parse_bool(
             account.get("cookiecloud_allow_insecure_http"),
             default=False,
@@ -416,8 +440,12 @@ class Script:
         self.url = validate_service_origin(
             account.get("url"),
             field_name="url",
-            allow_http=not self.verify_tls,
+            allow_http=(
+                self.allow_insecure_http or is_private_http_origin(account.get("url"))
+            ),
         )
+        if self.url.startswith("http://"):
+            print("⚠️ qBittorrent 使用内网 HTTP；API Key 将以明文在局域网传输")
         self.api_key = account.get("api_key")
         if not isinstance(self.api_key, str) or not self.api_key.strip():
             raise ValueError("api_key 必须是非空字符串")

@@ -25,10 +25,17 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self, *, final_text: str, first_error: Exception | None = None):
+    def __init__(
+        self,
+        *,
+        final_text: str,
+        verify_text: str = "",
+        first_error: Exception | None = None,
+    ):
         self.headers = {}
         self.final_text = final_text
         self.first_error = first_error
+        self.verify_text = verify_text
         self.get_count = 0
 
     def get(self, _url, **_kwargs):
@@ -39,7 +46,9 @@ class FakeSession:
             )
         if self.get_count == 2:
             return FakeResponse('<a href="?formhash=sign456">签到</a>')
-        return FakeResponse(self.final_text)
+        if self.get_count == 3:
+            return FakeResponse(self.final_text)
+        return FakeResponse(self.verify_text)
 
     def post(self, _url, **_kwargs):
         return FakeResponse("欢迎您回来")
@@ -55,7 +64,16 @@ class MtForumResponseTests(unittest.TestCase):
     def test_generic_cdata_error_is_not_reported_as_success(self):
         session = FakeSession(final_text="<![CDATA[系统繁忙，请稍后再试]]>")
 
-        self.assertFalse(make_script(session).run())
+        with self.assertRaisesRegex(RuntimeError, "签到失败"):
+            make_script(session).run()
+
+    def test_ambiguous_ajax_result_can_be_confirmed_by_signed_page(self):
+        session = FakeSession(
+            final_text="<![CDATA[恭喜获得随机奖励]]>",
+            verify_text="今日已签，您的签到排名 10",
+        )
+
+        self.assertTrue(make_script(session).run())
 
     def test_explicit_sign_success_is_accepted(self):
         session = FakeSession(final_text="<![CDATA[签到成功，获得奖励]]>")
@@ -68,7 +86,8 @@ class MtForumResponseTests(unittest.TestCase):
             first_error=requests.HTTPError("503 Service Unavailable"),
         )
 
-        self.assertFalse(make_script(session).run())
+        with self.assertRaisesRegex(RuntimeError, "访问登录页面失败"):
+            make_script(session).run()
         self.assertEqual(session.get_count, 1)
 
 

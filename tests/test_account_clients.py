@@ -65,8 +65,24 @@ class DjiClientTests(unittest.TestCase):
         sign_response = make_response(payload={"success": False}, text="{}")
         self.script.session.request.side_effect = [homepage, sign_response]
 
-        self.assertIs(self.script.run(), False)
+        with self.assertRaisesRegex(RuntimeError, "签到失败"):
+            self.script.run()
         self.assertEqual(self.script.session.request.call_count, 2)
+
+    def test_sign_accepts_legacy_true_and_already_signed_shapes(self):
+        self.assertTrue(self.script._confirmed_success({"success": "true"}))
+        self.assertTrue(
+            self.script._confirmed_success(
+                {"success": False, "message": "今天已经签到过了"},
+                allow_already=True,
+            )
+        )
+        self.assertFalse(
+            self.script._confirmed_success(
+                {"success": False, "message": "签到校验失败"},
+                allow_already=True,
+            )
+        )
 
     @patch("dji_bbs.time.sleep", return_value=None)
     def test_zero_balance_is_valid_when_all_business_steps_succeed(self, _sleep):

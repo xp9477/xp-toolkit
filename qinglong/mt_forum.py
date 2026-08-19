@@ -27,6 +27,18 @@ class Script:
         self.session = requests.Session()
         self.base_url = "https://bbs.binmt.cc"
 
+    @staticmethod
+    def _signed_page(text: str) -> bool:
+        return any(
+            marker in text
+            for marker in ("您的签到排名", "今日已签", "已累计签到", "已经签到")
+        )
+
+    @staticmethod
+    def _fail(message: str):
+        print(message)
+        raise RuntimeError(message)
+
     def run(self) -> bool:
         print(f"开始执行MT论坛签到 - 用户: {self.username}")
 
@@ -45,15 +57,13 @@ class Script:
             r1.raise_for_status()
             r1.encoding = "utf-8"
         except Exception as e:
-            print(f"访问登录页面失败: {e}")
-            return False
+            self._fail(f"访问登录页面失败: {e}")
 
         formhash_match = re.search(r"formhash=([a-zA-Z0-9]+)", r1.text) or re.search(
             r'name="formhash"\s+value="([a-zA-Z0-9]+)"', r1.text
         )
         if not formhash_match:
-            print("登录页面未找到 formhash")
-            return False
+            self._fail("登录页面未找到 formhash")
         formhash = formhash_match.group(1)
 
         # 2. 提交登录表单
@@ -77,8 +87,7 @@ class Script:
             r2.raise_for_status()
             r2.encoding = "utf-8"
         except Exception as e:
-            print(f"提交登录失败: {e}")
-            return False
+            self._fail(f"提交登录失败: {e}")
 
         # 验证是否登录成功
         if (
@@ -98,8 +107,7 @@ class Script:
                 if line.strip() and not line.strip().isdigit()
             ]
             msg = " | ".join(login_lines) if login_lines else "未知原因"
-            print(f"登录失败: {msg}")
-            return False
+            self._fail(f"登录失败: {msg}")
 
         print("登录成功")
 
@@ -111,14 +119,9 @@ class Script:
             r3.raise_for_status()
             r3.encoding = "utf-8"
         except Exception as e:
-            print(f"访问签到页面失败: {e}")
-            return False
+            self._fail(f"访问签到页面失败: {e}")
 
-        if (
-            "您的签到排名" in r3.text
-            or "今日已签" in r3.text
-            or "已累计签到" in r3.text
-        ):
+        if self._signed_page(r3.text):
             print("今天已经签到过了")
             return True
 
@@ -126,8 +129,7 @@ class Script:
             r"formhash=([a-zA-Z0-9]+)", r3.text
         ) or re.search(r'name="formhash"\s+value="([a-zA-Z0-9]+)"', r3.text)
         if not sign_formhash_match:
-            print("签到页面未找到 formhash")
-            return False
+            self._fail("签到页面未找到 formhash")
         sign_formhash = sign_formhash_match.group(1)
 
         # 4. 执行签到 AJAX 请求
@@ -150,8 +152,7 @@ class Script:
             r4.raise_for_status()
             r4.encoding = "utf-8"
         except Exception as e:
-            print(f"发送签到请求失败: {e}")
-            return False
+            self._fail(f"发送签到请求失败: {e}")
 
         # 提取并美化签到提示信息
         sign_cdata = re.search(r"<!\[CDATA\[(.*?)\]\]>", r4.text, re.DOTALL)
@@ -176,8 +177,20 @@ class Script:
         if any(marker in r4.text for marker in success_markers):
             print(f"签到成功！提示: {sign_msg}")
             return True
-        print(f"签到失败: {sign_msg}")
-        return False
+
+        # Discuz 插件版本的 AJAX 成功文案并不统一；用登录后的签到页状态做最终确认。
+        try:
+            verify = self.session.get(
+                f"{self.base_url}/plugin.php?id=k_misign:sign", timeout=15
+            )
+            verify.raise_for_status()
+            verify.encoding = "utf-8"
+        except Exception as e:
+            self._fail(f"签到结果不明确且复核失败: {e}")
+        if self._signed_page(verify.text):
+            print(f"签到成功（页面复核）；提示: {sign_msg}")
+            return True
+        self._fail(f"签到失败: {sign_msg}")
 
 
 def main() -> int:
