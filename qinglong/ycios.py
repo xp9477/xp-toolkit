@@ -140,7 +140,7 @@ class Script:
             # 获取用户信息
             try:
                 self.get_user_info()
-            except ValueError as e:
+            except (requests.RequestException, ValueError) as e:
                 print(f"积分信息读取失败（不影响签到）: {e}")
             return True
         except Exception as e:

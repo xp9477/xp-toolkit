@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
+import requests
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "qinglong"))
 
@@ -83,6 +85,11 @@ class DjiTests(unittest.TestCase):
         self.script.session.request.side_effect = respond
         self.assertTrue(self.script.run())
 
+    def test_optional_balance_network_failure_is_ignored(self):
+        self.script.session.request.side_effect = requests.ConnectionError("offline")
+
+        self.script._show_balance({"Cookie": "secret=1"})
+
 
 class HdlTests(unittest.TestCase):
     def setUp(self):
@@ -120,6 +127,14 @@ class HdlTests(unittest.TestCase):
         )
         self.assertTrue(self.client.signin())
 
+    def test_optional_queries_do_not_fail_a_successful_signin(self):
+        self.client.login = MagicMock(return_value=True)
+        self.client.query = MagicMock(side_effect=requests.ConnectionError("offline"))
+        self.client.signin = MagicMock(return_value=True)
+        self.client.queryFragment = MagicMock(side_effect=ValueError("changed"))
+
+        self.assertTrue(self.client.run())
+
 
 class YciosTests(unittest.TestCase):
     def setUp(self):
@@ -156,6 +171,16 @@ class YciosTests(unittest.TestCase):
 
         self.assertFalse(self.script.run())
         self.script.get_user_info.assert_not_called()
+
+    def test_optional_credit_network_failure_is_ignored(self):
+        self.script.get_token = MagicMock(return_value="token")
+        self.script.login = MagicMock(return_value=True)
+        self.script.daily_sign = MagicMock(return_value=True)
+        self.script.get_user_info = MagicMock(
+            side_effect=requests.ConnectionError("offline")
+        )
+
+        self.assertTrue(self.script.run())
 
 
 if __name__ == "__main__":

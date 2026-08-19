@@ -77,6 +77,32 @@ class Script:
         detail = cls._message(payload) or "服务未返回明确成功标记"
         raise RuntimeError(f"{operation}失败: {detail}")
 
+    def _show_balance(self, headers: dict) -> None:
+        try:
+            credit_response = self._request(
+                "GET",
+                f"{DJI_ORIGIN}/home.php?mod=spacecp&ac=credit&op=widthdraw",
+                headers=headers,
+            )
+            balance_response = self._request(
+                "GET",
+                f"{DJI_ORIGIN}/misc.php?mod=dji_credit",
+                headers=headers,
+            )
+        except requests.RequestException as exc:
+            print(f"积分余额读取失败（不影响签到）: {exc}")
+            return
+
+        credit = re.search(r"<span>未兑换：(\d+)分</span>", credit_response.text)
+        try:
+            balance = (
+                balance_response.json().get("data", {}).get("dji_credit_rmb", "未找到")
+            )
+        except (AttributeError, ValueError):
+            balance = "未找到"
+        print(f"未兑换积分：{credit.group(1) if credit else '未找到'}")
+        print(f"余额：{balance}")
+
     def run(self):
         """执行脚本逻辑"""
         user_info = f"用户: {self.username}" if self.username else "账号"
@@ -185,24 +211,8 @@ class Script:
             print(f"回复帖子成功: {i + 1}")
             time.sleep(1)
 
-        # 请求 5：查看可兑换积分和余额
-        r5 = self._request(
-            "GET",
-            f"{DJI_ORIGIN}/home.php?mod=spacecp&ac=credit&op=widthdraw",
-            headers=headers,
-        )
-        r6 = self._request(
-            "GET",
-            f"{DJI_ORIGIN}/misc.php?mod=dji_credit",
-            headers=headers,
-        )
-        credit = re.search(r"<span>未兑换：(\d+)分</span>", r5.text)
-        try:
-            balance = r6.json().get("data", {}).get("dji_credit_rmb", "未找到")
-        except (AttributeError, ValueError):
-            balance = "未找到"
-        print(f"未兑换积分：{credit.group(1) if credit else '未找到'}")
-        print(f"余额：{balance}")
+        # 积分和余额只用于展示，读取失败不否定前面已成功的签到。
+        self._show_balance(headers)
         return True
 
 

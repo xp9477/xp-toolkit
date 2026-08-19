@@ -152,7 +152,19 @@ class HdlClient:
         return True
 
     def run(self):
-        return self.login() and self.query() and self.signin() and self.queryFragment()
+        if not self.login():
+            return False
+        try:
+            self.query()
+        except (requests.RequestException, ValueError) as exc:
+            print(f"活动信息读取失败（继续签到）: {exc}")
+        if not self.signin():
+            return False
+        try:
+            self.queryFragment()
+        except (requests.RequestException, ValueError) as exc:
+            print(f"碎片信息读取失败（不影响签到）: {exc}")
+        return True
 
 
 class Script:
