@@ -90,6 +90,29 @@ class DjiTests(unittest.TestCase):
 
         self.script._show_balance({"Cookie": "secret=1"})
 
+    def test_reply_csrf_is_optional_and_never_hardcoded(self):
+        source = Path(dji_bbs.__file__).read_text(encoding="utf-8")
+
+        self.assertNotIn("87be3a37-def6-4fb6-af73-aba16ff737ba", source)
+        configured = dji_bbs.Script({"cookie": "secret=1", "csrf_token": "fresh-token"})
+        self.assertEqual(configured.csrf_token, "fresh-token")
+
+    @patch("dji_bbs.time.sleep", return_value=None)
+    def test_reply_bonus_failure_does_not_undo_signin(self, _sleep):
+        self.script._request = MagicMock(
+            side_effect=[
+                response(text="已登录"),
+                response(payload={"success": True}),
+                *[response(text="用户主页") for _ in range(10)],
+                response(text="山高水长"),
+                response(payload={"success": False, "message": "token expired"}),
+                response(text="<span>未兑换：0分</span>"),
+                response(payload={"data": {"dji_credit_rmb": 0}}),
+            ]
+        )
+
+        self.assertTrue(self.script.run())
+
 
 class HdlTests(unittest.TestCase):
     def setUp(self):

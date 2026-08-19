@@ -4,7 +4,7 @@ cron: 0 0 * * *
 description: 大疆社区每日签到
 
 env:
-- `dji_bbs`: 每行一个 JSON 对象，字段 `username`, `cookie`
+- `dji_bbs`: 每行一个 JSON 对象，字段 `username`, `cookie`；需要回复奖励时可加 `csrf_token`
 """
 
 import re
@@ -26,6 +26,7 @@ class Script:
         self.account = account
         self.username = account.get("username", "")
         self.cookie = account.get("cookie", "")
+        self.csrf_token = str(account.get("csrf_token") or "").strip()
         require_fields(account, "cookie")
         self.session = requests.Session()
 
@@ -174,8 +175,9 @@ class Script:
             "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
             # 必须携带登录 Cookie，否则接口会返回 401 未授权
             "Cookie": self.cookie,
-            "x-csrf-token": "87be3a37-def6-4fb6-af73-aba16ff737ba",  # 动态获取更佳
         }
+        if self.csrf_token:
+            reply_headers["x-csrf-token"] = self.csrf_token
         # session的cookie是自动的，不用headers/cookie
         for i in range(5):
             # 获取古诗词文案并作为 message
@@ -188,12 +190,16 @@ class Script:
             except (requests.RequestException, RuntimeError, ValueError):
                 gushici_message = "."
 
-            r4 = self._request(
-                "POST",
-                reply_url,
-                headers=reply_headers,
-                json={"message": gushici_message},
-            )
+            try:
+                r4 = self._request(
+                    "POST",
+                    reply_url,
+                    headers=reply_headers,
+                    json={"message": gushici_message},
+                )
+            except requests.RequestException as exc:
+                print(f"回复奖励失败（不影响签到）: {exc}")
+                break
             # 不同版本的回复接口成功响应结构不同；只拒绝明确的失败标记。
             try:
                 reply_payload = r4.json()
@@ -207,7 +213,9 @@ class Script:
                     "error",
                     "0",
                 }:
-                    self._business_failure(f"第 {i + 1} 次回复", reply_payload)
+                    detail = self._message(reply_payload) or "服务拒绝回复"
+                    print(f"回复奖励失败（不影响签到）: {detail}")
+                    break
             print(f"回复帖子成功: {i + 1}")
             time.sleep(1)
 
