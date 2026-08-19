@@ -5,6 +5,12 @@ HOST-SUFFIX,piggo.me,Self-Proxy
 HOST-SUFFIX,dmhy.org,Self-Proxy
 HOST-SUFFIX,fsm.name,Self-Proxy
 HOST-SUFFIX,jpopsuki.eu,Self-Proxy
+# > Steam 登录/商店/社区
+HOST-SUFFIX,steampowered.com,Self-Proxy
+HOST-SUFFIX,steamcommunity.com,Self-Proxy
+HOST-SUFFIX,steamstatic.com,Self-Proxy
+HOST-SUFFIX,steamusercontent.com,Self-Proxy
+HOST-SUFFIX,steam-chat.com,Self-Proxy
 # > Others
 HOST,copilot.microsoft.com,Self-Proxy
 HOST-SUFFIX,is.gd,Self-Proxy

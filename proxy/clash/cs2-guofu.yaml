@@ -1,0 +1,40 @@
+# OpenClash / Mihomo 顶部自定义规则（国服）
+# 订阅 Self-Direct / Self-Proxy 只覆盖域名；cs2.exe 大量 UDP 是裸 IP，必须靠进程规则。
+# 用法：iStoreOS → OpenClash → 规则设置 → 自定义规则 → 顶部规则，整段粘贴。
+# PROXY 需改成你现有的代理策略组名（例如「节点选择」）。
+
+# 放最上面。国服不要走任何节点
+PROCESS-NAME,cs2.exe,DIRECT
+PROCESS-NAME,steam.exe,PROXY
+
+DOMAIN-SUFFIX,steamserver.net,DIRECT
+DOMAIN-SUFFIX,valve.net,DIRECT
+DOMAIN-SUFFIX,playcsgo.com,DIRECT
+
+# 完美世界 / 国服
+DOMAIN-SUFFIX,wmpvp.com,DIRECT
+DOMAIN-SUFFIX,pwesports.cn,DIRECT
+DOMAIN-SUFFIX,perfectworld.com,DIRECT
+DOMAIN-SUFFIX,perfectworld.com.cn,DIRECT
+DOMAIN-SUFFIX,wanmei.com,DIRECT
+DOMAIN-SUFFIX,pwrd.com,DIRECT
+DOMAIN-SUFFIX,steamchina.com,DIRECT
+
+# Steam 登录/商店/社区继续代理
+DOMAIN-SUFFIX,steampowered.com,PROXY
+DOMAIN-SUFFIX,steamcommunity.com,PROXY
+DOMAIN-SUFFIX,steamstatic.com,PROXY
+DOMAIN-SUFFIX,steamusercontent.com,PROXY
+DOMAIN-SUFFIX,steam-chat.com,PROXY
+
+# Fake-IP 排除（写到 OpenClash DNS / Mihomo dns.fake-ip-filter，不要当路由规则）：
+# - '*.steamserver.net'
+# - '*.valve.net'
+# - '*.playcsgo.com'
+# - '*.wmpvp.com'
+# - '*.pwesports.cn'
+# - '*.perfectworld.com'
+# - '*.perfectworld.com.cn'
+# - '*.wanmei.com'
+# - '*.pwrd.com'
+# - '*.steamchina.com'

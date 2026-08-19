@@ -8,6 +8,17 @@ HOST-SUFFIX,hares.top,Self-Direct
 HOST-SUFFIX,1ptba.com,Self-Direct
 HOST-SUFFIX,audiences.me,Self-Direct
 HOST-SUFFIX,cinefiles.info,Self-Direct
+# > CS2 国服 / Valve 对战
+HOST-SUFFIX,steamserver.net,Self-Direct
+HOST-SUFFIX,valve.net,Self-Direct
+HOST-SUFFIX,playcsgo.com,Self-Direct
+HOST-SUFFIX,wmpvp.com,Self-Direct
+HOST-SUFFIX,pwesports.cn,Self-Direct
+HOST-SUFFIX,perfectworld.com,Self-Direct
+HOST-SUFFIX,perfectworld.com.cn,Self-Direct
+HOST-SUFFIX,wanmei.com,Self-Direct
+HOST-SUFFIX,pwrd.com,Self-Direct
+HOST-SUFFIX,steamchina.com,Self-Direct
 # > Others
 HOST-SUFFIX,x6d.com,Self-Direct
 HOST-SUFFIX,apple.com,Self-Direct
