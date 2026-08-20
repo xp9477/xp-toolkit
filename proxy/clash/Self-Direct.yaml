@@ -9,6 +9,13 @@ payload:
   - DOMAIN-SUFFIX,1ptba.com
   - DOMAIN-SUFFIX,audiences.me
   - DOMAIN-SUFFIX,cinefiles.info
+# > WeChat
+  - DOMAIN-SUFFIX,weixin.qq.com
+  - DOMAIN-SUFFIX,wx.qq.com
+  - DOMAIN-SUFFIX,qpic.cn
+  - DOMAIN-SUFFIX,qlogo.cn
+  - DOMAIN-SUFFIX,servicewechat.com
+  - DOMAIN-SUFFIX,wechat.com
 # > Others
   - DOMAIN-SUFFIX,x6d.com
   - DOMAIN-SUFFIX,apple.com
