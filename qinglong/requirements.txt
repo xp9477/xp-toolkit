@@ -1,5 +1,5 @@
 # 青龙脚本的直接运行时依赖。固定版本，避免面板自动安装时发生隐式升级。
-cryptography==50.0.0
+cryptography==50.0.1
 httpx==0.28.1
 lunardate==0.3.0
 requests==2.34.2
