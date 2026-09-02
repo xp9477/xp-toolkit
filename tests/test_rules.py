@@ -23,13 +23,10 @@ class ParserTests(unittest.TestCase):
             root = Path(directory)
             loon = root / "rules.list"
             clash = root / "rules.yaml"
-            quanx = root / "quanx.list"
             sync_rules.write_loon(intermediate, loon)
             sync_rules.write_clash(intermediate, clash)
-            sync_rules.write_quanx(intermediate, quanx, "Policy")
             self.assertEqual(sync_rules.parse_loon(loon), intermediate)
             self.assertEqual(sync_rules.parse_clash(clash), intermediate)
-            self.assertEqual(sync_rules.parse_quanx(quanx, "Policy"), intermediate)
 
     def test_unknown_rule_is_rejected_instead_of_dropped(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -38,13 +35,6 @@ class ParserTests(unittest.TestCase):
             with self.assertRaises(sync_rules.RuleFormatError):
                 sync_rules.parse_loon(path)
 
-    def test_wrong_quanx_policy_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "rules.list"
-            path.write_text("HOST,api.example.com,Wrong\n", encoding="utf-8")
-            with self.assertRaises(sync_rules.RuleFormatError):
-                sync_rules.parse_quanx(path, "Expected")
-
 
 class SyncTests(unittest.TestCase):
     def test_divergent_changed_sources_are_rejected_without_writing(self):
@@ -52,23 +42,20 @@ class SyncTests(unittest.TestCase):
             root = Path(directory)
             loon = root / "rules.list"
             clash = root / "rules.yaml"
-            quanx = root / "quanx.list"
             loon.write_text("DOMAIN,a.example\n", encoding="utf-8")
-            clash.write_text("payload:\n  - DOMAIN,b.example\n", encoding="utf-8")
-            original = "HOST,a.example,Policy\n"
-            quanx.write_text(original, encoding="utf-8")
+            original = "payload:\n  - DOMAIN,b.example\n"
+            clash.write_text(original, encoding="utf-8")
             rule_sets = [
                 {
                     "name": "Test",
                     "policy": "Policy",
                     "loon": str(loon),
                     "clash": str(clash),
-                    "quanx": str(quanx),
                 }
             ]
             with self.assertRaises(sync_rules.RuleSyncError):
                 sync_rules.sync_from([str(loon), str(clash)], rule_sets=rule_sets)
-            self.assertEqual(quanx.read_text(encoding="utf-8"), original)
+            self.assertEqual(clash.read_text(encoding="utf-8"), original)
 
 
 class ConflictTests(unittest.TestCase):

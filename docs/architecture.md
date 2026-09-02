@@ -19,7 +19,6 @@ flowchart TB
 
   UL --> GEN[规则生成器]
   GEN --> CL[Clash 产物]
-  GEN --> QX[Quantumult X 产物]
   GEN --> LO[Loon 产物]
 
   QL --> QLR[青龙 / Python]
@@ -27,7 +26,6 @@ flowchart TB
   SC --> IOS[iOS / Scriptable]
   SK --> AG[Codex / mitmproxy 工具环境]
   CL --> PC[代理客户端]
-  QX --> PC
   LO --> PC
 
   Inputs --> CI[统一质量门禁]
@@ -52,7 +50,7 @@ Raycast 或浏览器工具链。
 - `proxy/loon/Self-Direct.list`
 - `proxy/loon/Self-Proxy.list`
 
-Clash 与 Quantumult X 文件是生成物。`.github/scripts/sync_rules.py` 负责转换，
+Clash 文件是生成物。`.github/scripts/sync_rules.py` 负责转换，
 `.github/scripts/check_rules.py` 负责格式、重复、语义冲突和一致性验证。禁止手工修补生成物，
 因为下一次生成会覆盖它，也无法确认哪一份才是真实来源。
 

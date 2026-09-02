@@ -21,3 +21,4 @@ payload:
   - DOMAIN-SUFFIX,apple.com
   - DOMAIN-SUFFIX,letsencrypt.org
   - DOMAIN-SUFFIX,linuxdo.org
+  - DOMAIN-SUFFIX,missav.ai

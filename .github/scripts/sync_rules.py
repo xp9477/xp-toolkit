@@ -1,4 +1,4 @@
-"""在 Loon、Clash 与 Quantumult X 之间同步代理规则。"""
+"""在 Loon 与 Clash 之间同步代理规则。"""
 
 from __future__ import annotations
 
@@ -105,37 +105,6 @@ def parse_clash(path):
     return result
 
 
-def parse_quanx(path, expected_policy=None):
-    source = _path(path)
-    result = []
-    with source.open(encoding="utf-8-sig") as file:
-        for number, raw_line in enumerate(file, 1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            if line.startswith("#"):
-                result.append(("comment", line))
-                continue
-            parts = [part.strip() for part in line.split(",")]
-            if len(parts) != 3 or parts[0] not in {"HOST", "HOST-SUFFIX"}:
-                raise _error(source, number, line, "不支持的 QuanX 规则")
-            kind, value, policy = parts
-            value = _domain(source, number, line, value)
-            if not policy:
-                raise _error(source, number, line, "策略名不能为空")
-            if expected_policy is not None and policy != expected_policy:
-                raise _error(
-                    source,
-                    number,
-                    line,
-                    f"策略应为 {expected_policy!r}，实际为 {policy!r}",
-                )
-            result.append(
-                ("domain-suffix" if kind == "HOST-SUFFIX" else "domain", value)
-            )
-    return result
-
-
 def _atomic_write(path, lines):
     target = _path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -173,24 +142,11 @@ def write_clash(intermediate, path):
     _atomic_write(path, lines)
 
 
-def write_quanx(intermediate, path, policy):
-    if not policy or "," in policy or any(char.isspace() for char in policy):
-        raise RuleFormatError(f"QuanX 策略名不合法: {policy!r}")
-    prefixes = {"domain": "HOST", "domain-suffix": "HOST-SUFFIX"}
-    lines = [
-        value if kind == "comment" else f"{prefixes[kind]},{value},{policy}"
-        for kind, value in intermediate
-    ]
-    _atomic_write(path, lines)
-
-
 def parse(rule_format, path, *, policy=None):
     if rule_format == "loon":
         return parse_loon(path)
     if rule_format == "clash":
         return parse_clash(path)
-    if rule_format == "quanx":
-        return parse_quanx(path, expected_policy=policy)
     raise ValueError(f"unknown format: {rule_format}")
 
 
@@ -200,14 +156,12 @@ RULE_SETS = [
         "policy": "Self-Direct",
         "loon": "proxy/loon/Self-Direct.list",
         "clash": "proxy/clash/Self-Direct.yaml",
-        "quanx": "proxy/quanx/Self-Direct.list",
     },
     {
         "name": "Self-Proxy",
         "policy": "Self-Proxy",
         "loon": "proxy/loon/Self-Proxy.list",
         "clash": "proxy/clash/Self-Proxy.yaml",
-        "quanx": "proxy/quanx/Self-Proxy.list",
     },
 ]
 
@@ -229,7 +183,7 @@ def sync_from(changed_files, *, rule_sets=None):
     for rule_set in RULE_SETS if rule_sets is None else rule_sets:
         formats = [
             fmt
-            for fmt in ("loon", "clash", "quanx")
+            for fmt in ("loon", "clash")
             if _changed_path(rule_set[fmt]) in changed
         ]
         if not formats:
@@ -246,23 +200,21 @@ def sync_from(changed_files, *, rule_sets=None):
         print(
             f"[{rule_set['name']}] source={source_format}, file={rule_set[source_format]}"
         )
-        for fmt in ("loon", "clash", "quanx"):
+        for fmt in ("loon", "clash"):
             if fmt in formats:
                 continue
             target = rule_set[fmt]
             if fmt == "loon":
                 write_loon(intermediate, target)
-            elif fmt == "clash":
-                write_clash(intermediate, target)
             else:
-                write_quanx(intermediate, target, rule_set["policy"])
+                write_clash(intermediate, target)
             written.append(target)
             print(f"  -> wrote {target}")
     return written
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="同步三种客户端的代理规则")
+    parser = argparse.ArgumentParser(description="同步 Loon 与 Clash 的代理规则")
     parser.add_argument("files", nargs="*", help="本次发生变化的规则文件")
     args = parser.parse_args(argv)
     sync_from(args.files or [rule_set["loon"] for rule_set in RULE_SETS])

@@ -60,7 +60,7 @@ python .github/scripts/sync_rules.py
 python .github/scripts/check_rules.py --offline
 ```
 
-把生成的 Clash 与 Quantumult X 文件一同提交。不要手工编辑生成物，也不要忽略语义冲突。
+把生成的 Clash 文件一同提交。不要手工编辑生成物，也不要忽略语义冲突。
 
 ### Userscripts
 

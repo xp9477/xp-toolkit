@@ -44,10 +44,10 @@ def check_consistency(errors):
     for rule_set in RULE_SETS:
         parsed = {
             fmt: parse(fmt, rule_set[fmt], policy=rule_set["policy"])
-            for fmt in ("loon", "clash", "quanx")
+            for fmt in ("loon", "clash")
         }
         baseline = parsed["loon"]
-        for fmt in ("clash", "quanx"):
+        for fmt in ("clash",):
             if parsed[fmt] != baseline:
                 errors.append(
                     f"[{rule_set['name']}] {fmt} 与 loon 不一致，请运行 sync_rules.py"

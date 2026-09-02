@@ -9,7 +9,6 @@
 | `qinglong/` | 青龙面板运行脚本（原 `qlScripts`） |
 | `proxy/clash/` | Clash 规则 |
 | `proxy/loon/` | Loon 规则、插件、脚本 |
-| `proxy/quanx/` | Quantumult X 规则 |
 | `skills/` | 自建 Codex / Agent Skills |
 | `raycast/` | 预留：Raycast 插件 |
 | `scriptable/` | iOS Scriptable 组件与脚本（AI 套餐用量） |
@@ -25,11 +24,10 @@
 ## 代理规则同步
 
 `proxy/loon/Self-Direct.list` 与 `Self-Proxy.list` 是唯一人工维护的数据源；
-Clash 和 QuanX 文件由脚本生成：
+Clash 文件由脚本生成：
 
 - Loon: `proxy/loon/*.list`
 - Clash: `proxy/clash/*.yaml`
-- QuanX: `proxy/quanx/*.list`
 
 修改 Loon 源后，在提交前运行：
 
