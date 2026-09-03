@@ -3,7 +3,7 @@
 // icon-color: brown; icon-glyph: book;
 //
 // AI Quota — SuperGrok / ChatGPT Plus / Google AI Pro
-// Release: 2026-08-19.1
+// Release: 2026-08-26.1
 // 中号组件：系统背景、官方彩色 logo、Notion / Instapaper 排版。
 //
 // 配置（任选，可叠加）：
@@ -399,14 +399,20 @@ async function listCpaFiles(cfg) {
   return Array.isArray(resp?.files) ? resp.files : [];
 }
 
-function findCpaFile(files, testers) {
-  return (
-    files.find((f) => {
-      if (f.disabled) return false;
-      const blob = `${f.provider || ""} ${f.type || ""} ${f.name || ""}`.toLowerCase();
-      return testers.some((t) => t.test(blob));
-    }) || null
-  );
+function findCpaFiles(files, testers) {
+  const seen = new Set();
+  const matched = [];
+  for (const f of files || []) {
+    if (f.disabled) continue;
+    const blob = `${f.provider || ""} ${f.type || ""} ${f.name || ""}`.toLowerCase();
+    if (!testers.some((t) => t.test(blob))) continue;
+    const index = authIndexOf(f);
+    const key = index == null ? `name:${f.name || ""}` : `idx:${index}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    matched.push(f);
+  }
+  return matched;
 }
 
 function authIndexOf(file) {
@@ -563,11 +569,42 @@ function parseAntigravity(body) {
 }
 
 // ---------- Fetchers ----------
-async function fetchGrok(cfg, files) {
-  if (!cfg.cpaApiKey || !cfg.cpaBaseUrl) {
-    return emptyService("grok", "SuperGrok", URLS.grok, "未配置");
+function averageServices(services) {
+  const ok = (services || []).filter((s) => s && s.ok && s.remainingPct != null);
+  if (!ok.length) throw new Error("无法解析额度");
+  const remainingPct = clampPct(
+    ok.reduce((sum, s) => sum + Number(s.remainingPct), 0) / ok.length
+  );
+  const bottleneck = ok.slice().sort((a, b) => a.remainingPct - b.remainingPct)[0];
+  return Object.assign({}, bottleneck, {
+    remainingPct,
+    usedPct: remainingPct == null ? null : clampPct(100 - remainingPct),
+    extra: bottleneck.extra || "",
+    ok: remainingPct != null,
+  });
+}
+
+async function fetchAveragedAccounts(files, testers, fetchOne, missingError) {
+  const accounts = findCpaFiles(files, testers);
+  if (!accounts.length) throw new Error(missingError);
+  const errors = [];
+  const settled = await Promise.all(
+    accounts.map(async (file) => {
+      try {
+        return await fetchOne(file);
+      } catch (e) {
+        errors.push(e);
+        return null;
+      }
+    })
+  );
+  if (!settled.some((s) => s && s.ok && s.remainingPct != null)) {
+    throw errors[0] || new Error(missingError);
   }
-  const xai = findCpaFile(files, [/xai/, /grok/]);
+  return averageServices(settled);
+}
+
+async function fetchGrokAccount(cfg, xai) {
   const authIndex = authIndexOf(xai);
   if (authIndex == null) throw new Error("CPA 未找到 Grok 认证");
   const resp = await cpaApiCall(cfg.cpaBaseUrl, cfg.cpaApiKey, {
@@ -585,11 +622,19 @@ async function fetchGrok(cfg, files) {
   return parseGrokBilling(parseApiBody(resp));
 }
 
-async function fetchChatGPT(cfg, files) {
+async function fetchGrok(cfg, files) {
   if (!cfg.cpaApiKey || !cfg.cpaBaseUrl) {
-    return emptyService("chatgpt", "ChatGPT", URLS.chatgpt, "未配置");
+    return emptyService("grok", "SuperGrok", URLS.grok, "未配置");
   }
-  const openai = findCpaFile(files, [/openai/, /chatgpt/, /codex/]);
+  return fetchAveragedAccounts(
+    files,
+    [/xai/, /grok/],
+    (file) => fetchGrokAccount(cfg, file),
+    "CPA 未找到 Grok 认证"
+  );
+}
+
+async function fetchChatGPTAccount(cfg, openai) {
   const authIndex = authIndexOf(openai);
   if (authIndex == null) throw new Error("CPA 未找到 ChatGPT 认证");
   const accountId =
@@ -608,11 +653,19 @@ async function fetchChatGPT(cfg, files) {
   return parseChatGPTUsage(parseApiBody(resp));
 }
 
-async function fetchGemini(cfg, files) {
+async function fetchChatGPT(cfg, files) {
   if (!cfg.cpaApiKey || !cfg.cpaBaseUrl) {
-    return emptyService("gemini", "Gemini", URLS.gemini, "未配置");
+    return emptyService("chatgpt", "ChatGPT", URLS.chatgpt, "未配置");
   }
-  const ag = findCpaFile(files, [/antigravity/, /gemini/]);
+  return fetchAveragedAccounts(
+    files,
+    [/openai/, /chatgpt/, /codex/],
+    (file) => fetchChatGPTAccount(cfg, file),
+    "CPA 未找到 ChatGPT 认证"
+  );
+}
+
+async function fetchGeminiAccount(cfg, ag) {
   const authIndex = authIndexOf(ag);
   if (authIndex == null) throw new Error("CPA 未找到 Google 认证");
   const project = ag.project_id || ag.projectId || "";
@@ -628,6 +681,18 @@ async function fetchGemini(cfg, files) {
     data: JSON.stringify(project ? { project } : {}),
   });
   return parseAntigravity(parseApiBody(resp));
+}
+
+async function fetchGemini(cfg, files) {
+  if (!cfg.cpaApiKey || !cfg.cpaBaseUrl) {
+    return emptyService("gemini", "Gemini", URLS.gemini, "未配置");
+  }
+  return fetchAveragedAccounts(
+    files,
+    [/antigravity/, /gemini/],
+    (file) => fetchGeminiAccount(cfg, file),
+    "CPA 未找到 Google 认证"
+  );
 }
 
 async function fetchAll(cfg) {

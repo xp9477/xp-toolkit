@@ -12,9 +12,11 @@ iOS [Scriptable](https://scriptable.app) 组件与脚本。
 
 | 套餐 | 怎么取 | 主数字 |
 |---|---|---|
-| SuperGrok | 本脚本读 CPA 的 xAI 认证，再请求 `billing?format=credits` | 周额度剩余 |
-| ChatGPT Plus | 本脚本读 CPA 的 OpenAI / Codex 认证，再请求 `backend-api/wham/usage` | 按窗口时长判断，现在多为 7 天 |
-| Google AI Pro | 本脚本读 CPA 的 Anti Gravity 认证，再请求 `retrieveUserQuotaSummary` | 本周 / Gemini 桶 |
+| SuperGrok | 本脚本读 CPA 里全部启用的 xAI 认证，再请求 `billing?format=credits` | 周额度剩余 |
+| ChatGPT Plus | 本脚本读 CPA 里全部启用的 OpenAI / Codex 认证，再请求 `backend-api/wham/usage` | 按窗口时长判断，现在多为 7 天 |
+| Google AI Pro | 本脚本读 CPA 里全部启用的 Anti Gravity / Gemini 认证，再请求 `retrieveUserQuotaSummary` | 本周 / Gemini 桶 |
+
+同一类认证可以有多份。小组件仍显示三列，主数字是各账号剩余百分比的算术平均，不标账号数量。
 
 ChatGPT 不要按 `primary_window = 5 小时` 硬套。2026 年 7 月起 Plus / Pro 常把 5 小时窗口拿掉，`primary_window` 直接是 `604800`（7 天），`secondary_window` 为 `null`。TokenYou、CodexBar、CodeBurn 都是用窗口时长打标签，不是用字段位置。
 
@@ -26,7 +28,7 @@ ChatGPT 不要按 `primary_window = 5 小时` 硬套。2026 年 7 月起 Plus / 
 2. 在 App 内运行一次，填写 CPA 地址和 API Key
 3. 长按桌面 → 添加 Scriptable → 选本脚本 → 选择需要的尺寸
 
-以前配过 CPA 的话，地址和 Key 还在 Keychain 里，不用重填。CPA 里需要有 xAI、OpenAI/Codex、Anti Gravity 三份认证。
+以前配过 CPA 的话，地址和 Key 还在 Keychain 里，不用重填。CPA 里需要有 xAI、OpenAI/Codex、Anti Gravity 认证。
 
 ### 配置
 

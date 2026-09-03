@@ -194,22 +194,22 @@
           <input name="username" type="text" autocomplete="username">
         </label>
         <label>密码或应用密码
-          <input name="password" type="password" autocomplete="new-password" placeholder="留空以保留已保存密码">
+          <input name="password" type="password" autocomplete="current-password">
         </label>
         <label class="check-row">
           <input name="syncApiKey" type="checkbox">
           <span>同时同步 OpenAI API Key</span>
         </label>
-        <p class="notice warning">WebDAV 凭据始终只保存在当前设备。同步文件目前是 JSON 明文，建议不要同步 OpenAI API Key；公网地址建议使用 HTTPS。</p>
+        <p class="notice warning">WebDAV 凭据始终只保存在当前设备。同步文件目前是 JSON 明文，建议不要同步 OpenAI API Key，并且必须使用 HTTPS。</p>
         <p class="notice">${escapeHtml(syncStatusText())}</p>
       `,
-      values: { ...state.sync, password: '' },
+      values: state.sync,
       confirmText: '保存并同步',
       async onConfirm(values) {
         const enabled = values.enabled === 'on';
         const fileUrl = values.fileUrl.trim();
         const username = values.username.trim();
-        const password = values.password || state.sync.password;
+        const password = values.password;
         if (enabled && (!fileUrl || !username || !password)) {
           throw new Error('启用同步时必须填写文件 URL、用户名和密码');
         }
@@ -239,11 +239,9 @@
     } catch (error) {
       throw new Error('WebDAV 文件 URL 无效');
     }
-    if (!['http:', 'https:'].includes(url.protocol)) {
-      throw new Error('WebDAV 只支持 HTTP 或 HTTPS');
-    }
-    if (url.username || url.password) {
-      throw new Error('WebDAV URL 不能包含用户名或密码');
+    const localHost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) {
+      throw new Error('WebDAV 必须使用 HTTPS（本机地址除外）');
     }
   }
 
@@ -342,24 +340,17 @@
   }
 
   function applyRemoteConfig(remote) {
-    if (!remote || typeof remote !== 'object' || Array.isArray(remote)) {
-      throw new Error('远程同步配置无效');
-    }
-    const remoteBackend = remote.backend && typeof remote.backend === 'object'
-      && !Array.isArray(remote.backend) ? remote.backend : {};
-    const credentials = selectCredentialPair(
-      state.config.backend,
-      remoteBackend,
-      state.sync.syncApiKey
-    );
+    const localApiKey = state.config.backend.apiKey;
     const fallback = defaultConfig();
     state.config = {
       ...fallback,
       ...remote,
       backend: {
         ...fallback.backend,
-        ...remoteBackend,
-        ...credentials
+        ...(remote.backend || {}),
+        apiKey: state.sync.syncApiKey && remote.backend?.apiKey
+          ? remote.backend.apiKey
+          : localApiKey
       },
       sites: Array.isArray(remote.sites) ? remote.sites : []
     };
@@ -577,6 +568,13 @@
       return blobToDataUrl(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }));
     }
 
+    // Prefer pixels already rendered by the page. Many captcha endpoints return
+    // HTTP 403 to GM_xmlhttpRequest because they require session cookies / Referer.
+    if (element instanceof HTMLImageElement) {
+      const captured = await captureHtmlImage(element);
+      if (captured) return captured;
+    }
+
     let source = '';
     if (element instanceof HTMLImageElement) {
       source = element.currentSrc || element.src;
@@ -589,18 +587,81 @@
     if (!source) throw new Error('选中的元素没有可读取的图片');
     if (source.startsWith('data:')) return source;
     if (source.startsWith('blob:')) {
-      const response = await fetch(source);
+      const response = await fetch(source, { credentials: 'include' });
       if (!response.ok) throw new Error(`读取图片失败（HTTP ${response.status}）`);
       return blobToDataUrl(await response.blob());
     }
     return requestImageAsDataUrl(new URL(source, location.href).href);
   }
 
-  function requestImageAsDataUrl(url) {
+  async function captureHtmlImage(img) {
+    await waitForImage(img);
+    if (!img.naturalWidth || !img.naturalHeight) return null;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    try {
+      ctx.drawImage(img, 0, 0);
+      // toDataURL throws DOMException if the canvas is cross-origin tainted.
+      return canvas.toDataURL('image/png');
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function waitForImage(img) {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        img.removeEventListener('load', finish);
+        img.removeEventListener('error', finish);
+        resolve();
+      };
+      img.addEventListener('load', finish, { once: true });
+      img.addEventListener('error', finish, { once: true });
+      setTimeout(finish, 5000);
+    });
+  }
+
+  async function requestImageAsDataUrl(url) {
+    // 1) Page-context fetch: same-origin requests automatically send cookies + Referer.
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'reload',
+        mode: 'cors'
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob && blob.size > 0) return blobToDataUrl(blob);
+      }
+    } catch (error) {
+      // Fall through to GM_xmlhttpRequest for cross-origin / blocked fetch cases.
+    }
+
+    // 2) GM request with browser-like Referer (anti-hotlink / captcha endpoints).
+    return gmRequestImageAsDataUrl(url);
+  }
+
+  function gmRequestImageAsDataUrl(url) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'GET',
         url,
+        // Keep cookies for the target host (default), and mimic a normal image request.
+        anonymous: false,
+        headers: {
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'Referer': location.href
+        },
         responseType: 'arraybuffer',
         onload(response) {
           if (response.status < 200 || response.status >= 300) {
@@ -643,64 +704,89 @@
         data: JSON.stringify(body),
         timeout: 45000,
         onload(response) {
-          let payload;
-          try {
-            payload = JSON.parse(response.responseText);
-          } catch (error) {
-            reject(new Error(`AI 后端返回了非 JSON 内容（HTTP ${response.status}）`));
-            return;
+          const raw = String(response.responseText || '').trim();
+          let payload = null;
+          if (raw) {
+            try {
+              payload = JSON.parse(raw);
+            } catch (error) {
+              payload = null;
+            }
           }
+
           if (response.status < 200 || response.status >= 300) {
-            reject(new Error(payload.error?.message || `AI 请求失败（HTTP ${response.status}）`));
+            reject(new Error(formatAiHttpError(response.status, url, payload, raw)));
             return;
           }
+
+          if (!payload) {
+            reject(new Error(`AI 后端返回了非 JSON 内容（HTTP ${response.status}）。请求：${url}`));
+            return;
+          }
+
           const content = payload.choices?.[0]?.message?.content;
           const text = Array.isArray(content)
             ? content.map((part) => part.text || '').join('')
             : content;
           resolve(cleanModelAnswer(text));
         },
-        onerror: () => reject(new Error('连接 AI 后端失败')),
-        ontimeout: () => reject(new Error('AI 请求超时'))
+        onerror: () => reject(new Error(`连接 AI 后端失败。请求：${url}`)),
+        ontimeout: () => reject(new Error(`AI 请求超时。请求：${url}`))
       });
     });
   }
 
+  function formatAiHttpError(status, url, payload, raw) {
+    const serverMessage = payload?.error?.message
+      || payload?.message
+      || payload?.error
+      || (typeof payload?.detail === 'string' ? payload.detail : '');
+    const detail = typeof serverMessage === 'string' ? serverMessage.trim() : '';
+
+    if (status === 404) {
+      return [
+        `AI 接口地址不存在（HTTP 404）。`,
+        `当前请求：${url}`,
+        detail ? `服务端：${detail}` : '',
+        '请在「AI 后端设置」中检查接口地址：可填 base（如 https://api.openai.com/v1）或完整 /chat/completions URL。'
+      ].filter(Boolean).join(' ');
+    }
+
+    if (status === 401 || status === 403) {
+      return `AI 鉴权失败（HTTP ${status}）。请检查 API Key。${detail ? ` 服务端：${detail}` : ''}`;
+    }
+
+    if (detail) return `AI 请求失败（HTTP ${status}）：${detail}`;
+
+    const snippet = raw && !raw.startsWith('<') && raw.length <= 180 ? raw : '';
+    return snippet
+      ? `AI 请求失败（HTTP ${status}）：${snippet}`
+      : `AI 请求失败（HTTP ${status}）。请求：${url}`;
+  }
+
   function completionUrl(baseUrl) {
-    const trimmed = validateBackendUrl(baseUrl);
-    return /\/chat\/completions$/i.test(trimmed) ? trimmed : `${trimmed}/chat/completions`;
-  }
+    const trimmed = String(baseUrl || '').trim().replace(/\/+$/, '');
+    if (!trimmed) return trimmed;
 
-  function validateBackendUrl(value) {
-    let url;
+    // Already a full chat completions endpoint.
+    if (/\/chat\/completions$/i.test(trimmed)) return trimmed;
+
+    // Common OpenAI-compatible roots end with /v1 (or /v1beta, etc.).
+    if (/\/v\d+(?:beta)?$/i.test(trimmed)) {
+      return `${trimmed}/chat/completions`;
+    }
+
+    // Bare origin / host only → default to /v1/chat/completions.
     try {
-      url = new URL(String(value).trim());
+      const parsed = new URL(trimmed);
+      if (!parsed.pathname || parsed.pathname === '/') {
+        return `${trimmed}/v1/chat/completions`;
+      }
     } catch (error) {
-      throw new Error('AI 后端地址无效');
+      // Keep fall-through for non-absolute values.
     }
-    if (!['http:', 'https:'].includes(url.protocol)) {
-      throw new Error('AI 后端只支持 HTTP 或 HTTPS');
-    }
-    if (url.username || url.password || url.search || url.hash) {
-      throw new Error('AI 后端地址不能包含凭据、查询参数或片段');
-    }
-    return url.href.replace(/\/+$/, '');
-  }
 
-  function selectCredentialPair(current, incoming, allowIncoming) {
-    const currentBaseUrl = typeof current?.baseUrl === 'string' ? current.baseUrl : '';
-    const currentApiKey = typeof current?.apiKey === 'string' ? current.apiKey : '';
-    const incomingBaseUrl = typeof incoming?.baseUrl === 'string'
-      ? incoming.baseUrl.trim() : '';
-    const incomingApiKey = typeof incoming?.apiKey === 'string'
-      ? incoming.apiKey.trim() : '';
-    if (!allowIncoming || !incomingBaseUrl || !incomingApiKey) {
-      return { baseUrl: currentBaseUrl, apiKey: currentApiKey };
-    }
-    return {
-      baseUrl: validateBackendUrl(incomingBaseUrl),
-      apiKey: incomingApiKey
-    };
+    return `${trimmed}/chat/completions`;
   }
 
   function cleanModelAnswer(content) {
@@ -743,10 +829,10 @@
       content: `
         <label>接口地址
           <input name="baseUrl" type="url" autocomplete="off" placeholder="https://api.openai.com/v1">
-          <small>填写 OpenAI 兼容 API 的基础地址或完整 /chat/completions 地址。</small>
+          <small>推荐填 base，例如 https://api.openai.com/v1（会自动补 /chat/completions）。也可直接填完整 completions URL。仅填域名时会走 /v1/chat/completions。</small>
         </label>
         <label>API Key
-          <input name="apiKey" type="password" autocomplete="new-password" placeholder="留空以保留已保存 Key">
+          <input name="apiKey" type="password" autocomplete="new-password" placeholder="sk-...">
         </label>
         <label>模型名称
           <input name="model" type="text" autocomplete="off" placeholder="gpt-4.1-mini">
@@ -757,16 +843,15 @@
         </label>
         <p class="notice">Key 保存在 Tampermonkey 本机存储中。验证码图片会发送到你填写的后端。</p>
       `,
-      values: { ...current, apiKey: '' },
+      values: current,
       confirmText: '保存',
       onConfirm(values) {
-        const apiKey = values.apiKey.trim() || current.apiKey;
-        if (!values.baseUrl || !apiKey || !values.model) {
+        if (!values.baseUrl || !values.apiKey || !values.model) {
           throw new Error('接口地址、API Key 和模型名称都必须填写');
         }
         state.config.backend = {
-          baseUrl: validateBackendUrl(values.baseUrl),
-          apiKey,
+          baseUrl: values.baseUrl.trim(),
+          apiKey: values.apiKey.trim(),
           model: values.model.trim(),
           prompt: values.prompt.trim() || DEFAULT_PROMPT
         };
@@ -1005,13 +1090,10 @@
     const payload = JSON.stringify({
       format: 'captcha-filler-config',
       exportedAt: new Date().toISOString(),
-      config: {
-        ...state.config,
-        backend: { ...state.config.backend, apiKey: '' }
-      }
+      config: state.config
     }, null, 2);
     GM_setClipboard(payload, 'text');
-    showToast('配置已复制到剪贴板（不包含 API Key）');
+    showToast('全部配置已复制到剪贴板（包含 API Key）');
   }
 
   async function importConfig() {
@@ -1021,7 +1103,7 @@
         <label>配置 JSON
           <textarea name="payload" rows="12" placeholder="粘贴另一台设备导出的配置"></textarea>
         </label>
-        <p class="notice warning">导入会覆盖模型、提示词和全部站点配置；只有同时提供后端地址与 API Key 时才会替换本地凭据对。</p>
+        <p class="notice warning">导入会覆盖当前后端设置和全部站点配置。</p>
       `,
       values: { payload: '' },
       confirmText: '导入并覆盖',
@@ -1036,25 +1118,13 @@
           throw new Error('这不是 Captcha Filler 导出的配置');
         }
         const incoming = parsed.config;
-        if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)
-          || !incoming.backend || typeof incoming.backend !== 'object'
-          || Array.isArray(incoming.backend) || !Array.isArray(incoming.sites)) {
+        if (!incoming.backend || !Array.isArray(incoming.sites)) {
           throw new Error('配置内容不完整');
         }
-        const credentials = selectCredentialPair(
-          state.config.backend,
-          incoming.backend,
-          true
-        );
-        const backend = {
-          ...defaultConfig().backend,
-          ...incoming.backend,
-          ...credentials
-        };
         state.config = {
           ...defaultConfig(),
           ...incoming,
-          backend,
+          backend: { ...defaultConfig().backend, ...incoming.backend },
           sites: incoming.sites
         };
         saveConfig();

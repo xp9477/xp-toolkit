@@ -25,7 +25,7 @@ const context = vm.createContext({ Color, console });
 vm.runInContext(
   `${source.slice(0, end)}\n` +
     "globalThis.testApi = { hasAnyAuth, normalizeCpaBaseUrl, cacheScope, authIndexOf, " +
-    "normalizeUsageWindow, parseChatGPTUsage, parseAntigravity };",
+    "findCpaFiles, averageServices, normalizeUsageWindow, parseChatGPTUsage, parseAntigravity };",
   context
 );
 const api = context.testApi;
@@ -103,4 +103,51 @@ test("Google parser rejects responses without quota buckets", () => {
     () => api.parseAntigravity({ groups: [] }),
     /无法解析 Google 额度/
   );
+});
+
+test("CPA matcher keeps every enabled account of a provider", () => {
+  const files = [
+    { provider: "antigravity", name: "a.json", auth_index: 1, disabled: true },
+    { provider: "antigravity", name: "b.json", auth_index: 2 },
+    { provider: "gemini", name: "c.json", authIndex: 3 },
+    { provider: "antigravity", name: "dup.json", auth_index: 2 },
+    { provider: "codex", name: "one.json", auth_index: 4 },
+    { provider: "openai", name: "two.json", auth_index: 5 },
+    { provider: "xai", name: "grok.json", auth_index: 9 },
+  ];
+  const gemini = api.findCpaFiles(files, [/antigravity/, /gemini/]);
+  assert.equal(gemini.length, 2);
+  assert.equal(api.authIndexOf(gemini[0]), 2);
+  assert.equal(api.authIndexOf(gemini[1]), 3);
+  const codex = api.findCpaFiles(files, [/openai/, /chatgpt/, /codex/]);
+  assert.equal(codex.length, 2);
+  assert.equal(api.authIndexOf(codex[0]), 4);
+  assert.equal(api.authIndexOf(codex[1]), 5);
+});
+
+test("remaining percent averages across accounts without counting them", () => {
+  const two = api.averageServices([
+    { ok: true, remainingPct: 80, resetHint: "3天后", extra: "5小时剩 90%" },
+    { ok: true, remainingPct: 20, resetHint: "1天后", extra: "5小时剩 10%" },
+  ]);
+  assert.equal(two.remainingPct, 50);
+  assert.equal(two.usedPct, 50);
+  assert.equal(two.extra, "5小时剩 10%");
+  assert.equal(two.resetHint, "1天后");
+
+  const three = api.averageServices([
+    { ok: true, remainingPct: 90, extra: "" },
+    { ok: true, remainingPct: 60, extra: "" },
+    { ok: true, remainingPct: 30, extra: "" },
+  ]);
+  assert.equal(three.remainingPct, 60);
+  assert.equal(three.extra, "");
+
+  const partial = api.averageServices([{ ok: true, remainingPct: 40, extra: "" }, null, { ok: false }]);
+  assert.equal(partial.remainingPct, 40);
+  assert.equal(partial.extra, "");
+
+  const single = api.averageServices([{ ok: true, remainingPct: 77, resetHint: "2天后", extra: "" }]);
+  assert.equal(single.remainingPct, 77);
+  assert.equal(single.extra, "");
 });
