@@ -182,9 +182,7 @@ def sync_from(changed_files, *, rule_sets=None):
     written = []
     for rule_set in RULE_SETS if rule_sets is None else rule_sets:
         formats = [
-            fmt
-            for fmt in ("loon", "clash")
-            if _changed_path(rule_set[fmt]) in changed
+            fmt for fmt in ("loon", "clash") if _changed_path(rule_set[fmt]) in changed
         ]
         if not formats:
             continue
