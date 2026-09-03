@@ -194,7 +194,7 @@
           <input name="username" type="text" autocomplete="username">
         </label>
         <label>密码或应用密码
-          <input name="password" type="password" autocomplete="current-password">
+          <input name="password" type="password" autocomplete="new-password" placeholder="留空以保留已保存密码">
         </label>
         <label class="check-row">
           <input name="syncApiKey" type="checkbox">
@@ -203,13 +203,13 @@
         <p class="notice warning">WebDAV 凭据始终只保存在当前设备。同步文件目前是 JSON 明文，建议不要同步 OpenAI API Key，并且必须使用 HTTPS。</p>
         <p class="notice">${escapeHtml(syncStatusText())}</p>
       `,
-      values: state.sync,
+      values: { ...state.sync, password: '' },
       confirmText: '保存并同步',
       async onConfirm(values) {
         const enabled = values.enabled === 'on';
         const fileUrl = values.fileUrl.trim();
         const username = values.username.trim();
-        const password = values.password;
+        const password = values.password || state.sync.password;
         if (enabled && (!fileUrl || !username || !password)) {
           throw new Error('启用同步时必须填写文件 URL、用户名和密码');
         }
@@ -242,6 +242,9 @@
     const localHost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
     if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) {
       throw new Error('WebDAV 必须使用 HTTPS（本机地址除外）');
+    }
+    if (url.username || url.password) {
+      throw new Error('WebDAV URL 不能包含用户名或密码');
     }
   }
 
@@ -340,17 +343,24 @@
   }
 
   function applyRemoteConfig(remote) {
-    const localApiKey = state.config.backend.apiKey;
+    if (!remote || typeof remote !== 'object' || Array.isArray(remote)) {
+      throw new Error('远程同步配置无效');
+    }
+    const remoteBackend = remote.backend && typeof remote.backend === 'object'
+      && !Array.isArray(remote.backend) ? remote.backend : {};
+    const credentials = selectCredentialPair(
+      state.config.backend,
+      remoteBackend,
+      state.sync.syncApiKey
+    );
     const fallback = defaultConfig();
     state.config = {
       ...fallback,
       ...remote,
       backend: {
         ...fallback.backend,
-        ...(remote.backend || {}),
-        apiKey: state.sync.syncApiKey && remote.backend?.apiKey
-          ? remote.backend.apiKey
-          : localApiKey
+        ...remoteBackend,
+        ...credentials
       },
       sites: Array.isArray(remote.sites) ? remote.sites : []
     };
@@ -765,28 +775,50 @@
   }
 
   function completionUrl(baseUrl) {
-    const trimmed = String(baseUrl || '').trim().replace(/\/+$/, '');
-    if (!trimmed) return trimmed;
-
-    // Already a full chat completions endpoint.
+    const trimmed = validateBackendUrl(baseUrl);
     if (/\/chat\/completions$/i.test(trimmed)) return trimmed;
-
-    // Common OpenAI-compatible roots end with /v1 (or /v1beta, etc.).
-    if (/\/v\d+(?:beta)?$/i.test(trimmed)) {
-      return `${trimmed}/chat/completions`;
-    }
-
-    // Bare origin / host only → default to /v1/chat/completions.
+    if (/\/v\d+(?:beta)?$/i.test(trimmed)) return `${trimmed}/chat/completions`;
     try {
       const parsed = new URL(trimmed);
       if (!parsed.pathname || parsed.pathname === '/') {
         return `${trimmed}/v1/chat/completions`;
       }
     } catch (error) {
-      // Keep fall-through for non-absolute values.
+      // validateBackendUrl already accepted this value.
     }
-
     return `${trimmed}/chat/completions`;
+  }
+
+  function validateBackendUrl(value) {
+    let url;
+    try {
+      url = new URL(String(value).trim());
+    } catch (error) {
+      throw new Error('AI 后端地址无效');
+    }
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('AI 后端只支持 HTTP 和 HTTPS');
+    }
+    if (url.username || url.password || url.search || url.hash) {
+      throw new Error('AI 后端地址不能包含凭据、查询参数或片段');
+    }
+    return url.href.replace(/\/+$/, '');
+  }
+
+  function selectCredentialPair(current, incoming, allowIncoming) {
+    const currentBaseUrl = typeof current?.baseUrl === 'string' ? current.baseUrl : '';
+    const currentApiKey = typeof current?.apiKey === 'string' ? current.apiKey : '';
+    const incomingBaseUrl = typeof incoming?.baseUrl === 'string'
+      ? incoming.baseUrl.trim() : '';
+    const incomingApiKey = typeof incoming?.apiKey === 'string'
+      ? incoming.apiKey.trim() : '';
+    if (!allowIncoming || !incomingBaseUrl || !incomingApiKey) {
+      return { baseUrl: currentBaseUrl, apiKey: currentApiKey };
+    }
+    return {
+      baseUrl: validateBackendUrl(incomingBaseUrl),
+      apiKey: incomingApiKey
+    };
   }
 
   function cleanModelAnswer(content) {
@@ -832,7 +864,7 @@
           <small>推荐填 base，例如 https://api.openai.com/v1（会自动补 /chat/completions）。也可直接填完整 completions URL。仅填域名时会走 /v1/chat/completions。</small>
         </label>
         <label>API Key
-          <input name="apiKey" type="password" autocomplete="new-password" placeholder="sk-...">
+          <input name="apiKey" type="password" autocomplete="new-password" placeholder="留空以保留已保存 Key">
         </label>
         <label>模型名称
           <input name="model" type="text" autocomplete="off" placeholder="gpt-4.1-mini">
@@ -843,15 +875,16 @@
         </label>
         <p class="notice">Key 保存在 Tampermonkey 本机存储中。验证码图片会发送到你填写的后端。</p>
       `,
-      values: current,
+      values: { ...current, apiKey: '' },
       confirmText: '保存',
       onConfirm(values) {
-        if (!values.baseUrl || !values.apiKey || !values.model) {
+        const apiKey = values.apiKey.trim() || current.apiKey;
+        if (!values.baseUrl || !apiKey || !values.model) {
           throw new Error('接口地址、API Key 和模型名称都必须填写');
         }
         state.config.backend = {
-          baseUrl: values.baseUrl.trim(),
-          apiKey: values.apiKey.trim(),
+          baseUrl: validateBackendUrl(values.baseUrl),
+          apiKey,
           model: values.model.trim(),
           prompt: values.prompt.trim() || DEFAULT_PROMPT
         };
@@ -1090,10 +1123,13 @@
     const payload = JSON.stringify({
       format: 'captcha-filler-config',
       exportedAt: new Date().toISOString(),
-      config: state.config
+      config: {
+        ...state.config,
+        backend: { ...state.config.backend, apiKey: '' }
+      }
     }, null, 2);
     GM_setClipboard(payload, 'text');
-    showToast('全部配置已复制到剪贴板（包含 API Key）');
+    showToast('配置已复制到剪贴板（不包含 API Key）');
   }
 
   async function importConfig() {
@@ -1121,10 +1157,19 @@
         if (!incoming.backend || !Array.isArray(incoming.sites)) {
           throw new Error('配置内容不完整');
         }
+        const credentials = selectCredentialPair(
+          state.config.backend,
+          incoming.backend,
+          true
+        );
         state.config = {
           ...defaultConfig(),
           ...incoming,
-          backend: { ...defaultConfig().backend, ...incoming.backend },
+          backend: {
+            ...defaultConfig().backend,
+            ...incoming.backend,
+            ...credentials
+          },
           sites: incoming.sites
         };
         saveConfig();
