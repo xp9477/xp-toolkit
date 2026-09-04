@@ -97,7 +97,9 @@ def is_private_http_origin(value) -> bool:
         if parsed.scheme != "http" or not parsed.hostname:
             return False
         hostname = parsed.hostname.rstrip(".").lower()
-        if hostname == "localhost" or hostname.endswith(".local"):
+        if hostname == "localhost" or hostname.endswith(
+            (".local", ".lan", ".home", ".internal", ".home.arpa")
+        ):
             return True
         address = ipaddress.ip_address(hostname)
         return address.is_private or address.is_loopback or address.is_link_local
@@ -152,10 +154,32 @@ def parse_chdbits_torrents(page_html):
             'class="circle-text">HR<' in chunk
             or 'class="circle">HR<' in chunk
             or ">HR</div>" in chunk
+            or 'title="Hit and Run"' in chunk
+            or 'title="Hit & Run"' in chunk
+            or 'title="Hit&Run"' in chunk
+            or 'alt="Hit and Run"' in chunk
+            or 'class="hitandrun"' in chunk
         )
         torrents.append((html_title_clean, has_hr, html_title))
 
-    return torrents or None
+    if torrents:
+        return torrents
+
+    if any(
+        kw in page_html
+        for kw in (
+            "没有记录",
+            "没有做种",
+            "当前没有",
+            "没有任何",
+            "No torrents",
+            "no torrents",
+            "Nothing found",
+        )
+    ):
+        return []
+
+    return None
 
 
 def find_unique_torrent_match(name, candidates):
@@ -174,6 +198,14 @@ def find_unique_torrent_match(name, candidates):
         return exact_matches[0], "matched"
     if len(exact_matches) > 1:
         return None, "ambiguous"
+
+    stripped_name = re.sub(r"^(?:chdbits|ptchdbits)", "", normalized_name)
+    if stripped_name != normalized_name and len(stripped_name) > 5:
+        stripped_matches = [item for item in candidates if item[0] == stripped_name]
+        if len(stripped_matches) == 1:
+            return stripped_matches[0], "matched"
+        if len(stripped_matches) > 1:
+            return None, "ambiguous"
 
     return None, "not_found"
 
@@ -194,7 +226,7 @@ def validate_cookiecloud_base_url(value, *, allow_http=False):
         _ = parsed.port
     except ValueError as exc:
         raise ValueError("CookieCloud URL 端口无效") from exc
-    if parsed.scheme != "https" and not allow_http:
+    if parsed.scheme != "https" and not (allow_http or is_private_http_origin(raw)):
         raise ValueError("CookieCloud URL 必须使用 HTTPS")
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
 
@@ -248,8 +280,13 @@ def get_cookiecloud_cookies(
         if not isinstance(uuid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{6,128}", uuid):
             raise ValueError("CookieCloud UUID 格式无效")
         req_url = f"{base_url}/get/{quote(uuid, safe='')}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }
         # 官方服务端在无 password 请求体时返回密文；密码只在本地参与解密，绝不进入 URL。
-        response = httpx.get(req_url, timeout=30, follow_redirects=False)
+        response = httpx.get(
+            req_url, headers=headers, timeout=30, follow_redirects=False
+        )
         if response.status_code != 200:
             print(f"❌ 请求 CookieCloud 失败，状态码: {response.status_code}")
             return None
@@ -308,23 +345,46 @@ class QBittorrentClient:
     def __init__(self, base_url, api_key, *, verify_tls=True):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Authorization": f"Bearer {self.api_key}",
+            "X-Api-Key": self.api_key,
+            "Referer": f"{self.base_url}/",
+            "Origin": self.base_url,
+        }
         self.session = httpx.Client(
             base_url=self.base_url,
             verify=verify_tls,
             timeout=30,
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            headers=headers,
+            cookies={"SID": self.api_key},
         )
 
     def login(self):
-        """验证 API Key 是否有效"""
+        """验证 API Key 是否有效，兼容 Bearer Token、SID Cookie 与 username:password"""
         try:
             response = self.session.get("/api/v2/app/version")
             if response.status_code == 200:
                 print("✅ API Key 验证成功")
                 return True
-            else:
-                print(f"❌ API Key 验证失败，状态码: {response.status_code}")
-                return False
+
+            if response.status_code in {401, 403} and ":" in self.api_key:
+                username, password = self.api_key.split(":", 1)
+                login_resp = self.session.post(
+                    "/api/v2/auth/login",
+                    data={"username": username, "password": password},
+                )
+                if login_resp.status_code == 200 and login_resp.text.strip() in {
+                    "Ok.",
+                    "",
+                }:
+                    verify_resp = self.session.get("/api/v2/app/version")
+                    if verify_resp.status_code == 200:
+                        print("✅ qBittorrent 账号密码登录成功")
+                        return True
+
+            print(f"❌ API Key 验证失败，状态码: {response.status_code}")
+            return False
         except Exception as e:
             print(f"❌ API Key 验证异常: {e}")
             return False
@@ -453,6 +513,7 @@ class Script:
             account.get("chdbits_tracker_hosts")
         )
         self.client = None
+        self.last_error = ""
 
     def delete_candidate(self, hash_value, name, tags=()):
         """只有显式关闭 dry-run 后才会发送删除请求。"""
@@ -478,8 +539,15 @@ class Script:
     def get_chdbits_userdetails(self, userid, cookies_dict):
         # NexusPHP 的正在做种列表通常通过 AJAX 异步加载，直接访问 userdetails.php 获取不到列表HTML
         url = f"https://ptchdbits.co/getusertorrentlistajax.php?userid={userid}&type=seeding"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://ptchdbits.co/",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
         try:
-            response = httpx.get(url, cookies=cookies_dict, timeout=30)
+            response = httpx.get(
+                url, cookies=cookies_dict, headers=headers, timeout=30
+            )
             if response.status_code == 200:
                 return response.text
             else:
@@ -529,6 +597,7 @@ class Script:
             # 登录
             if not self.client.login():
                 print("❌ 登录失败，任务终止")
+                self.last_error = "qBittorrent 登录验证失败"
                 return False
 
             # 获取种子列表
@@ -536,6 +605,7 @@ class Script:
             torrents = self.client.get_torrents()
             if torrents is None:
                 print("❌ 种子列表不可用，任务终止")
+                self.last_error = "获取 qBittorrent 种子列表失败"
                 return False
             if not torrents:
                 print("✅ 当前没有种子，无需处理")
@@ -715,10 +785,12 @@ class Script:
 
             if inspection_failed:
                 print("❌ 部分种子因证据不完整或删除失败而保留")
+                self.last_error = "部分种子因证据不完整或删除失败而保留"
             return not inspection_failed
 
         except Exception as e:
             print(f"❌ 执行过程中发生异常: {e}")
+            self.last_error = f"执行异常: {e}"
             return False
         finally:
             if self.client:

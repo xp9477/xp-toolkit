@@ -262,6 +262,9 @@ class MatchingAndParsingTests(unittest.TestCase):
         self.assertEqual(cookies, {"sid": "cookie"})
         get.assert_called_once_with(
             "https://cookies.example/api/get/uuid-123",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
             timeout=30,
             follow_redirects=False,
         )
@@ -315,6 +318,30 @@ class MatchingAndParsingTests(unittest.TestCase):
         self.assertIsNone(torrents)
         self.assertIsNone(trackers)
         self.assertIsNone(qb.parse_chdbits_torrents("<html>layout changed</html>"))
+
+    def test_cookiecloud_private_http_allowed(self):
+        self.assertEqual(
+            qb.validate_cookiecloud_base_url("http://192.168.1.100:8088/api/"),
+            "http://192.168.1.100:8088/api",
+        )
+        self.assertEqual(
+            qb.validate_cookiecloud_base_url("http://localhost:8088/api"),
+            "http://localhost:8088/api",
+        )
+
+    def test_parse_chdbits_torrents_empty_seeding_list(self):
+        self.assertEqual(
+            qb.parse_chdbits_torrents("<table><tr><td>没有做种的种子</td></tr></table>"),
+            [],
+        )
+
+    def test_find_unique_torrent_match_with_site_prefix(self):
+        candidates = [
+            ("moviename20241080p", False, "Movie Name 2024 1080p"),
+        ]
+        match, status = qb.find_unique_torrent_match("[CHDBits] Movie.Name.2024.1080p", candidates)
+        self.assertEqual(status, "matched")
+        self.assertEqual(match[0], "moviename20241080p")
 
     def test_client_delete_defaults_to_preserving_files(self):
         client = object.__new__(qb.QBittorrentClient)

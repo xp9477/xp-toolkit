@@ -54,6 +54,27 @@ class DjiTests(unittest.TestCase):
                 allow_already=True,
             )
         )
+        self.assertTrue(
+            self.script._confirmed_success(
+                {"error": {"code": 10001, "message": "您今日已签到过啦"}},
+                allow_already=True,
+            )
+        )
+        self.assertTrue(
+            self.script._confirmed_success(
+                {"data": {"success": True, "increased": 2}}
+            )
+        )
+        self.assertTrue(
+            self.script._confirmed_success(
+                {"signed": True}
+            )
+        )
+        self.assertTrue(
+            self.script._confirmed_success(
+                {"code": 0, "data": {"increased": 2}}
+            )
+        )
 
     def test_sign_failure_stops_followup_actions(self):
         self.script.session.request.side_effect = [

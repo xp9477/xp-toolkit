@@ -56,20 +56,51 @@ class Script:
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
                 return re.sub(r"\s+", " ", value).strip()[:160]
+        error = payload.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "msg", "errorMessage"):
+                value = error.get(key)
+                if isinstance(value, str) and value.strip():
+                    return re.sub(r"\s+", " ", value).strip()[:160]
+        elif isinstance(error, str) and error.strip():
+            return re.sub(r"\s+", " ", error).strip()[:160]
+        data = payload.get("data")
+        if isinstance(data, dict):
+            for key in ("message", "msg", "errorMessage"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return re.sub(r"\s+", " ", value).strip()[:160]
         return ""
 
     @classmethod
     def _confirmed_success(cls, payload: dict, *, allow_already=False) -> bool:
         value = payload.get("success")
+        if value is None and isinstance(payload.get("data"), dict):
+            value = payload["data"].get("success")
         succeeded = str(value).strip().lower() in {"true", "success", "ok", "1"}
         if succeeded:
             return True
+
+        signed_val = payload.get("signed")
+        if signed_val is None and isinstance(payload.get("data"), dict):
+            signed_val = payload["data"].get("signed")
+        if signed_val is None and isinstance(payload.get("item"), dict):
+            signed_val = payload["item"].get("signed")
+        if str(signed_val).strip().lower() in {"true", "1"}:
+            return True
+
+        code = payload.get("code")
+        if code in (0, 200, "0", "200") and not payload.get("error") and payload.get("success") is not False:
+            return True
+
         if not allow_already:
             return False
         message = cls._message(payload)
         return bool(
             re.search(
-                r"(?:今日|今天).{0,4}(?:已|已经).{0,3}签|已经签到|已签到", message
+                r"(?:今日|今天).{0,6}(?:已|已经).{0,4}签|已经签到|已签到|重复签到|签到过|今日已完成|already\s*signed",
+                message,
+                re.IGNORECASE,
             )
         )
 
@@ -142,8 +173,18 @@ class Script:
         sign_payload = self._json_object(r2, "签到")
         if not self._confirmed_success(sign_payload, allow_already=True):
             self._business_failure("签到", sign_payload)
-        increased = sign_payload.get("increased")
-        print(f"签到成功；增长：{increased if increased is not None else '未知'}")
+        sign_msg = self._message(sign_payload)
+        if re.search(
+            r"(?:今日|今天).{0,6}(?:已|已经).{0,4}签|已经签到|已签到|重复签到|签到过|今日已完成|already\s*signed",
+            sign_msg,
+            re.IGNORECASE,
+        ):
+            print("已签到过了")
+        else:
+            increased = sign_payload.get("increased")
+            if increased is None and isinstance(sign_payload.get("data"), dict):
+                increased = sign_payload["data"].get("increased")
+            print(f"签到成功；增长：{increased if increased is not None else '未知'}")
 
         # 请求3: 访问其他用户空间（5分）
         users = [

@@ -408,8 +408,10 @@ def run_account_scripts(
 
     for index, account in enumerate(accounts, 1):
         display_name = account_display_name(account, index)
+        runner = None
         try:
-            result = script_factory(account).run()
+            runner = script_factory(account)
+            result = runner.run()
         except SystemExit as exc:
             message = normalize_exception(exc)
             print(f"账号执行失败 - {display_name}, 错误: {message}")
@@ -422,7 +424,7 @@ def run_account_scripts(
             continue
 
         if result is False:
-            message = "脚本返回失败"
+            message = getattr(runner, "last_error", None) or "脚本返回失败"
             print(f"账号执行失败 - {display_name}, 错误: {message}")
             failures.append(FailureRecord(display_name=display_name, error=message))
             continue
@@ -445,8 +447,10 @@ async def _run_async_account(
 ) -> tuple[bool, FailureRecord | None]:
     display_name = account_display_name(account, index)
 
+    runner = None
     try:
-        result = script_factory(account).run()
+        runner = script_factory(account)
+        result = runner.run()
         if asyncio.iscoroutine(result):
             result = await result
     except SystemExit as exc:
@@ -459,7 +463,7 @@ async def _run_async_account(
         return False, FailureRecord(display_name=display_name, error=message)
 
     if result is False:
-        message = "脚本返回失败"
+        message = getattr(runner, "last_error", None) or "脚本返回失败"
         print(f"账号执行失败 - {display_name}, 错误: {message}")
         return False, FailureRecord(display_name=display_name, error=message)
 
