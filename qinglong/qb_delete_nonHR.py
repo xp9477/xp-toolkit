@@ -11,11 +11,11 @@ env:
 - 默认 `verify_tls=true`；仅 qBittorrent 使用自签名证书时显式关闭
 - RFC1918/loopback/`.local` 内网地址可直接使用 HTTP；其他 HTTP 地址需显式设置
   `allow_insecure_http=true`
-- CookieCloud 默认也要求 HTTPS；无法迁移的旧服务需显式设置
+- CookieCloud 默认也要求 HTTPS；局域网私有地址自动兼容 HTTP，其他 HTTP 服务需显式设置
   `cookiecloud_allow_insecure_http=true`
-- 可选: `delete_files`, `verify_tls`, `allow_insecure_http`, `chdbits_tracker_hosts`,
-  `cookiecloud_allow_insecure_http`, `cookiecloud_url`, `cookiecloud_uuid`,
-  `cookiecloud_password`, `chdbits_userid`
+- 可选: `delete_files`, `verify_tls`, `allow_insecure_http`, `strict_inspection`,
+  `chdbits_tracker_hosts`, `cookiecloud_allow_insecure_http`, `cookiecloud_url`,
+  `cookiecloud_uuid`, `cookiecloud_password`, `chdbits_userid`
 """
 
 import base64
@@ -337,7 +337,13 @@ def get_cookiecloud_cookies(
             raise ValueError("cookie_data 必须是对象或数组")
         return cookies_dict
     except Exception as e:
-        print(f"❌ 获取 CookieCloud 异常: {e}")
+        err_msg = str(e)
+        if "Connection refused" in err_msg or "111" in err_msg:
+            print(
+                f"❌ 获取 CookieCloud 异常: {e} (提示: 若在青龙等 Docker 容器内运行，请勿使用 127.0.0.1/localhost，需使用宿主机内网 IP 或 Docker 网关 IP 172.17.0.1)"
+            )
+        else:
+            print(f"❌ 获取 CookieCloud 异常: {e}")
         return None
 
 
@@ -511,6 +517,11 @@ class Script:
             raise ValueError("api_key 必须是非空字符串")
         self.allowed_tracker_hosts = parse_tracker_hosts(
             account.get("chdbits_tracker_hosts")
+        )
+        self.strict_inspection = parse_bool(
+            account.get("strict_inspection"),
+            default=True,
+            field_name="strict_inspection",
         )
         self.client = None
         self.last_error = ""
@@ -784,9 +795,13 @@ class Script:
                     print(f"   {i}. {name}")
 
             if inspection_failed:
-                print("❌ 部分种子因证据不完整或删除失败而保留")
-                self.last_error = "部分种子因证据不完整或删除失败而保留"
-            return not inspection_failed
+                if self.strict_inspection and not self.dry_run:
+                    print("❌ 部分种子因证据不完整或删除失败而保留")
+                    self.last_error = "部分种子因证据不完整或删除失败而保留"
+                    return False
+                else:
+                    print("⚠️  部分种子因证据不完整或删除失败而保留（已安全跳过）")
+            return True
 
         except Exception as e:
             print(f"❌ 执行过程中发生异常: {e}")

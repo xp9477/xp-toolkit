@@ -94,6 +94,50 @@ class ScriptSafetyTests(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(client.delete_calls, [])
 
+    def test_dry_run_inspection_failure_does_not_fail_script(self):
+        FakeClient.torrents = [
+            {"hash": TORRENT_HASH, "name": "Movie.2024.Remux", "tags": "已整理"}
+        ]
+        FakeClient.trackers = [{"url": "https://tracker.ptchdbits.co/announce"}]
+        account = self.account(dry_run=True, chdbits_userid="123")
+        output = io.StringIO()
+        with (
+            patch.object(qb, "QBittorrentClient", FakeClient),
+            patch.object(qb, "get_cookiecloud_cookies", return_value=None),
+            patch.dict(os.environ, {"cookiecloud_url": "http://cookies.local", "cookiecloud_uuid": "u", "cookiecloud_password": "p"}),
+            contextlib.redirect_stdout(output),
+        ):
+            result = qb.Script(account).run()
+
+        self.assertTrue(result)
+        self.assertIn("已安全跳过", output.getvalue())
+
+    def test_strict_inspection_disabled_allows_live_run_to_succeed(self):
+        FakeClient.torrents = [
+            {"hash": TORRENT_HASH, "name": "Movie.2024.Remux", "tags": "已整理"}
+        ]
+        FakeClient.trackers = [{"url": "https://tracker.ptchdbits.co/announce"}]
+        account = self.account(
+            dry_run=False,
+            strict_inspection=False,
+            chdbits_userid="123",
+            cookiecloud_url="http://cookies.local",
+            cookiecloud_uuid="uuid",
+            cookiecloud_password="password",
+        )
+        output = io.StringIO()
+        with (
+            patch.object(qb, "QBittorrentClient", FakeClient),
+            patch.object(qb, "get_cookiecloud_cookies", return_value=None),
+            patch.dict(os.environ, {}, clear=True),
+            contextlib.redirect_stdout(output),
+        ):
+            result = qb.Script(account).run()
+
+        self.assertTrue(result)
+        self.assertEqual(FakeClient.instances[-1].delete_calls, [])
+        self.assertIn("已安全跳过", output.getvalue())
+
     def test_non_exact_hr_match_never_deletes(self):
         FakeClient.torrents = [
             {"hash": TORRENT_HASH, "name": "Movie.2024.Remux", "tags": "已整理"}
