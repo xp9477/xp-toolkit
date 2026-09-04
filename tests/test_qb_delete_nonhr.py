@@ -379,6 +379,14 @@ class MatchingAndParsingTests(unittest.TestCase):
             [],
         )
 
+    def test_find_unique_torrent_match_with_chinese_prefix(self):
+        candidates = [
+            (qb.normalize_torrent_name("Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB"), False, "Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB"),
+        ]
+        match, status = qb.find_unique_torrent_match("特立独行.Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB", candidates)
+        self.assertEqual(status, "matched")
+        self.assertEqual(match[2], "Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB")
+
     def test_find_unique_torrent_match_with_site_prefix(self):
         candidates = [
             ("moviename20241080p", False, "Movie Name 2024 1080p"),

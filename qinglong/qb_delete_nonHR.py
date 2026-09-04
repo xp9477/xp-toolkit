@@ -20,6 +20,7 @@ env:
 
 import base64
 import hashlib
+import html
 import ipaddress
 import json
 import os
@@ -119,7 +120,14 @@ def tracker_hostnames(trackers):
 def normalize_torrent_name(value):
     if not isinstance(value, str):
         return ""
-    return re.sub(r"[\W_]+", "", value).lower()
+    val = html.unescape(value)
+    return re.sub(r"[\W_]+", "", val).lower()
+
+
+def strip_cjk_characters(value):
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[一-鿿぀-ヿ가-힯]+", "", value)
 
 
 def parse_chdbits_torrents(page_html):
@@ -186,25 +194,39 @@ def find_unique_torrent_match(name, candidates):
     """
     返回唯一的 CHDBits 名称匹配。
 
-    仅接受去标点、大小写归一化后的唯一精确匹配。包含关系即使只有一个候选，
-    也不足以作为自动删除证据。
+    1. 优先接受去标点、大小写归一化后的唯一精确匹配。
+    2. 兼容剥离站点前缀（如 chdbits / ptchdbits）后的精确匹配。
+    3. 兼容中英文混合命名（如 qB 带中文片名前缀，站点为纯英文 release 名，或反之）在剔除 CJK 字符后的唯一精确匹配。
     """
     normalized_name = normalize_torrent_name(name)
     if len(normalized_name) <= 5:
         return None, "invalid"
 
+    # 1. 直接精确匹配
     exact_matches = [item for item in candidates if item[0] == normalized_name]
     if len(exact_matches) == 1:
         return exact_matches[0], "matched"
     if len(exact_matches) > 1:
         return None, "ambiguous"
 
+    # 2. 剥离站点前缀匹配
     stripped_name = re.sub(r"^(?:chdbits|ptchdbits)", "", normalized_name)
     if stripped_name != normalized_name and len(stripped_name) > 5:
         stripped_matches = [item for item in candidates if item[0] == stripped_name]
         if len(stripped_matches) == 1:
             return stripped_matches[0], "matched"
         if len(stripped_matches) > 1:
+            return None, "ambiguous"
+
+    # 3. 剔除 CJK 字符后的唯一英文章节精确匹配（如 特立独行.Keep.Real... 与 Keep.Real...）
+    ascii_name = strip_cjk_characters(normalized_name)
+    if len(ascii_name) >= 10:
+        ascii_matches = [
+            item for item in candidates if strip_cjk_characters(item[0]) == ascii_name
+        ]
+        if len(ascii_matches) == 1:
+            return ascii_matches[0], "matched"
+        if len(ascii_matches) > 1:
             return None, "ambiguous"
 
     return None, "not_found"
