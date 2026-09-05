@@ -90,7 +90,11 @@ class Script:
             return True
 
         code = payload.get("code")
-        if code in (0, 200, "0", "200") and not payload.get("error") and payload.get("success") is not False:
+        if (
+            code in (0, 200, "0", "200")
+            and not payload.get("error")
+            and payload.get("success") is not False
+        ):
             return True
 
         if not allow_already:

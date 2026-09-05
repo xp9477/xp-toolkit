@@ -337,15 +337,25 @@ class MatchingAndParsingTests(unittest.TestCase):
 
     def test_parse_chdbits_torrents_empty_seeding_list(self):
         self.assertEqual(
-            qb.parse_chdbits_torrents("<table><tr><td>没有做种的种子</td></tr></table>"),
+            qb.parse_chdbits_torrents(
+                "<table><tr><td>没有做种的种子</td></tr></table>"
+            ),
             [],
         )
 
     def test_find_unique_torrent_match_with_chinese_prefix(self):
         candidates = [
-            (qb.normalize_torrent_name("Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB"), False, "Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB"),
+            (
+                qb.normalize_torrent_name(
+                    "Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB"
+                ),
+                False,
+                "Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB",
+            ),
         ]
-        match, status = qb.find_unique_torrent_match("特立独行.Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB", candidates)
+        match, status = qb.find_unique_torrent_match(
+            "特立独行.Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB", candidates
+        )
         self.assertEqual(status, "matched")
         self.assertEqual(match[2], "Keep.Real.2026.2160p.WEB-DL.H.265.HDR.AAC2.0-HHWEB")
 
@@ -353,7 +363,9 @@ class MatchingAndParsingTests(unittest.TestCase):
         candidates = [
             ("moviename20241080p", False, "Movie Name 2024 1080p"),
         ]
-        match, status = qb.find_unique_torrent_match("[CHDBits] Movie.Name.2024.1080p", candidates)
+        match, status = qb.find_unique_torrent_match(
+            "[CHDBits] Movie.Name.2024.1080p", candidates
+        )
         self.assertEqual(status, "matched")
         self.assertEqual(match[0], "moviename20241080p")
 

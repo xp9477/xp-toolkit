@@ -561,9 +561,7 @@ class Script:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         try:
-            response = httpx.get(
-                url, cookies=cookies_dict, headers=headers, timeout=30
-            )
+            response = httpx.get(url, cookies=cookies_dict, headers=headers, timeout=30)
             if response.status_code == 200:
                 return response.text
             else:
