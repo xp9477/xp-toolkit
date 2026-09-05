@@ -125,7 +125,11 @@ def get_bark_push() -> str:
 
 
 def _send_bark_post(
-    server: str, device_key: str, title: str, content: str
+    server: str,
+    device_key: str,
+    title: str,
+    content: str,
+    group: str = "xp-toolkit",
 ) -> tuple[bool, str]:
     url = f"{server.rstrip('/')}/push"
     payload = {
@@ -133,7 +137,7 @@ def _send_bark_post(
         "body": content,
         "device_key": device_key,
         # 分组方便在 Bark 里筛选
-        "group": "ashare-kimi3",
+        "group": group,
     }
     resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
     ok = 200 <= resp.status_code < 300
@@ -151,13 +155,19 @@ def _send_bark_post(
 
 
 def _send_bark_get(
-    server: str, device_key: str, title: str, content: str
+    server: str,
+    device_key: str,
+    title: str,
+    content: str,
+    group: str = "xp-toolkit",
 ) -> tuple[bool, str]:
     # GET 路径方式对长中文不友好，仅作后备
     url = (
         f"{server.rstrip('/')}/{quote(device_key, safe='')}/"
         f"{quote(title, safe='')}/{quote(content, safe='')}"
     )
+    if group:
+        url = f"{url}?group={quote(group, safe='')}"
     if len(url) > 1800:
         return False, f"GET URL 过长({len(url)}), 已跳过"
     resp = requests.get(url, timeout=REQUEST_TIMEOUT)
@@ -174,7 +184,7 @@ def _send_bark_get(
     return ok, f"{detail} {msg}".rstrip()
 
 
-def send(title: str, content: str) -> bool:
+def send(title: str, content: str, group: str | None = None) -> bool:
     """发送 Bark 推送。成功返回 True，失败打印原因并返回 False。"""
     bark_raw = get_bark_push()
     if not bark_raw:
@@ -215,7 +225,15 @@ def send(title: str, content: str) -> bool:
     )
 
     try:
-        ok, detail = _send_bark_post(server, device_key, title, content)
+        if not group:
+            if "kimi" in title.lower() or "a股" in title.lower():
+                group = "ashare-kimi3"
+            elif " " in title.strip():
+                group = title.strip().split()[0]
+            else:
+                group = "xp-toolkit"
+
+        ok, detail = _send_bark_post(server, device_key, title, content, group=group)
         if ok:
             print(f"Bark 推送成功: {detail}")
             return True
@@ -223,7 +241,7 @@ def send(title: str, content: str) -> bool:
             print(f"Bark POST 失败: {detail}；GET 后备默认禁用")
             return False
         print(f"Bark POST 失败: {detail}，尝试显式启用的 GET 后备…")
-        ok2, detail2 = _send_bark_get(server, device_key, title, content)
+        ok2, detail2 = _send_bark_get(server, device_key, title, content, group=group)
         if ok2:
             print(f"Bark GET 推送成功: {detail2}")
             return True
