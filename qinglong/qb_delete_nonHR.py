@@ -1,21 +1,17 @@
 """
 name: qBittorrent 删除非 CHDBits HR 种子
 cron: 0 * * * *
-description: 检查已整理标签中不包含 CHDBits tracker 的种子，默认仅预览
+description: 检查已整理标签中不包含 CHDBits tracker 或无 HR 的种子，自动清理种子及下载文件
 
 env:
 - `qb_delete_nonHR`: JSON 对象或 JSON 数组，必填 `url`, `api_key`
-- 默认 `dry_run=true` 且 `delete_files=false`；真正删除需显式设置 `dry_run=false`
-- 删除下载文件还必须额外设置 `delete_files_confirmation="DELETE_FILES"`
-- 每个允许删除下载文件的种子还必须带 `允许删除文件` 标签
-- 默认 `verify_tls=true`；仅 qBittorrent 使用自签名证书时显式关闭
-- RFC1918/loopback/`.local` 内网地址可直接使用 HTTP；其他 HTTP 地址需显式设置
-  `allow_insecure_http=true`
-- CookieCloud 默认也要求 HTTPS；局域网私有地址自动兼容 HTTP，其他 HTTP 服务需显式设置
-  `cookiecloud_allow_insecure_http=true`
-- 可选: `delete_files`, `verify_tls`, `allow_insecure_http`, `strict_inspection`,
-  `chdbits_tracker_hosts`, `cookiecloud_allow_insecure_http`, `cookiecloud_url`,
-  `cookiecloud_uuid`, `cookiecloud_password`, `chdbits_userid`
+- 默认直接执行真实删除（含本地下载文件）；如需演练预览可显式设置 `dry_run=true`
+- 如需保留下载文件仅从 qB 移除种子任务，可设置 `delete_files=false`
+- 默认 `verify_tls=true`；qBittorrent 使用自签名证书时可显式关闭
+- RFC1918/loopback/`.local` 等内网地址自动兼容 HTTP；公网 HTTP 需设置 `allow_insecure_http=true`
+- 可选: `dry_run`, `delete_files`, `verify_tls`, `allow_insecure_http`, `strict_inspection`,
+  `chdbits_tracker_hosts`, `cookiecloud_url`, `cookiecloud_uuid`,
+  `cookiecloud_password`, `chdbits_userid`
 """
 
 import base64
@@ -494,21 +490,14 @@ class Script:
         require_fields(account, "url", "api_key")
         self.dry_run = parse_bool(
             account.get("dry_run", account.get("dryRun")),
-            default=True,
+            default=False,
             field_name="dry_run",
         )
         self.delete_files = parse_bool(
             account.get("delete_files", account.get("deleteFiles")),
-            default=False,
+            default=True,
             field_name="delete_files",
         )
-        if (
-            self.delete_files
-            and account.get("delete_files_confirmation") != "DELETE_FILES"
-        ):
-            raise ValueError(
-                'delete_files=true 时必须同时设置 delete_files_confirmation="DELETE_FILES"'
-            )
         self.verify_tls = parse_bool(
             account.get("verify_tls"),
             default=True,
@@ -542,21 +531,14 @@ class Script:
         )
         self.strict_inspection = parse_bool(
             account.get("strict_inspection"),
-            default=True,
+            default=False,
             field_name="strict_inspection",
         )
         self.client = None
         self.last_error = ""
 
     def delete_candidate(self, hash_value, name, tags=()):
-        """只有显式关闭 dry-run 后才会发送删除请求。"""
-        if self.delete_files and FILE_DELETE_APPROVAL_TAG not in tags:
-            print(
-                f"🛑 已阻止删除 {name}：删除下载文件还需要种子标签 "
-                f"{FILE_DELETE_APPROVAL_TAG!r}"
-            )
-            return "blocked"
-
+        """根据配置执行真实删除或演练预览。"""
         if self.dry_run:
             file_action = "删除文件" if self.delete_files else "保留文件"
             print(f"🧪 [dry-run] 将删除种子（{file_action}）: {name}")
@@ -564,7 +546,8 @@ class Script:
 
         assert self.client is not None
         if self.client.delete_torrent(hash_value, delete_files=self.delete_files):
-            print(f"✅ 已删除种子: {name}")
+            file_action = "含文件" if self.delete_files else "保留文件"
+            print(f"✅ 已删除种子（{file_action}）: {name}")
             return "deleted"
         print(f"❌ 删除种子失败: {name}")
         return "failed"
@@ -822,7 +805,7 @@ class Script:
                     self.last_error = "部分种子因证据不完整或删除失败而保留"
                     return False
                 else:
-                    print("⚠️  部分种子因证据不完整或删除失败而保留（已安全跳过）")
+                    print("⚠️  部分种子因证据不完整已安全保留（跳过删除）")
             return True
 
         except Exception as e:

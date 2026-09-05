@@ -77,66 +77,57 @@ class ScriptSafetyTests(unittest.TestCase):
     def test_torrent_api_failure_aborts_without_deleting(self):
         FakeClient.torrents = None
 
-        result, _output, client = self.run_script(self.account(dry_run=False))
+        result, _output, client = self.run_script(self.account())
 
         self.assertFalse(result)
         self.assertEqual(client.delete_calls, [])
         self.assertTrue(client.closed)
 
-    def test_tracker_api_failure_keeps_torrent_and_reports_failure(self):
+    def test_tracker_api_failure_keeps_torrent_safely(self):
         FakeClient.torrents = [
             {"hash": TORRENT_HASH, "name": "Example.Release", "tags": "已整理"}
         ]
         FakeClient.trackers = None
 
-        result, _output, client = self.run_script(self.account(dry_run=False))
+        result, _output, client = self.run_script(self.account())
 
-        self.assertFalse(result)
+        self.assertTrue(result)
         self.assertEqual(client.delete_calls, [])
 
-    def test_dry_run_inspection_failure_does_not_fail_script(self):
+    def test_dry_run_preview_mode(self):
         FakeClient.torrents = [
-            {"hash": TORRENT_HASH, "name": "Movie.2024.Remux", "tags": "已整理"}
+            {"hash": TORRENT_HASH, "name": "Example.Release", "tags": "已整理"}
         ]
-        FakeClient.trackers = [{"url": "https://tracker.ptchdbits.co/announce"}]
-        account = self.account(dry_run=True, chdbits_userid="123")
-        output = io.StringIO()
-        with (
-            patch.object(qb, "QBittorrentClient", FakeClient),
-            patch.object(qb, "get_cookiecloud_cookies", return_value=None),
-            patch.dict(os.environ, {"cookiecloud_url": "http://cookies.local", "cookiecloud_uuid": "u", "cookiecloud_password": "p"}),
-            contextlib.redirect_stdout(output),
-        ):
-            result = qb.Script(account).run()
+        FakeClient.trackers = [{"url": "https://tracker.example/announce"}]
+
+        result, output, client = self.run_script(self.account(dry_run=True))
 
         self.assertTrue(result)
-        self.assertIn("已安全跳过", output.getvalue())
+        self.assertEqual(client.delete_calls, [])
+        self.assertIn("[dry-run]", output)
 
-    def test_strict_inspection_disabled_allows_live_run_to_succeed(self):
+    def test_default_executes_direct_delete_with_files(self):
         FakeClient.torrents = [
-            {"hash": TORRENT_HASH, "name": "Movie.2024.Remux", "tags": "已整理"}
+            {"hash": TORRENT_HASH, "name": "Example.Release", "tags": "已整理"}
         ]
-        FakeClient.trackers = [{"url": "https://tracker.ptchdbits.co/announce"}]
-        account = self.account(
-            dry_run=False,
-            strict_inspection=False,
-            chdbits_userid="123",
-            cookiecloud_url="http://cookies.local",
-            cookiecloud_uuid="uuid",
-            cookiecloud_password="password",
-        )
-        output = io.StringIO()
-        with (
-            patch.object(qb, "QBittorrentClient", FakeClient),
-            patch.object(qb, "get_cookiecloud_cookies", return_value=None),
-            patch.dict(os.environ, {}, clear=True),
-            contextlib.redirect_stdout(output),
-        ):
-            result = qb.Script(account).run()
+        FakeClient.trackers = [{"url": "udp://tracker.example:1337/announce"}]
+
+        result, _output, client = self.run_script(self.account())
 
         self.assertTrue(result)
-        self.assertEqual(FakeClient.instances[-1].delete_calls, [])
-        self.assertIn("已安全跳过", output.getvalue())
+        self.assertEqual(client.delete_calls, [(TORRENT_HASH, True)])
+        self.assertTrue(client.verify_tls)
+
+    def test_delete_files_false_preserves_files(self):
+        FakeClient.torrents = [
+            {"hash": TORRENT_HASH, "name": "Example.Release", "tags": "已整理"}
+        ]
+        FakeClient.trackers = [{"url": "udp://tracker.example:1337/announce"}]
+
+        result, _output, client = self.run_script(self.account(delete_files=False))
+
+        self.assertTrue(result)
+        self.assertEqual(client.delete_calls, [(TORRENT_HASH, False)])
 
     def test_non_exact_hr_match_never_deletes(self):
         FakeClient.torrents = [
@@ -150,7 +141,6 @@ class ScriptSafetyTests(unittest.TestCase):
             </table>
         """
         account = self.account(
-            dry_run=False,
             chdbits_userid="123",
             cookiecloud_url="https://cookies.example",
             cookiecloud_uuid="uuid",
@@ -166,33 +156,39 @@ class ScriptSafetyTests(unittest.TestCase):
         ):
             result = qb.Script(account).run()
 
-        self.assertFalse(result)
+        self.assertTrue(result)
         self.assertEqual(FakeClient.instances[-1].delete_calls, [])
         self.assertIn("未找到唯一精确匹配", output.getvalue())
 
-    def test_default_is_dry_run(self):
+    def test_hr_torrent_is_preserved(self):
         FakeClient.torrents = [
-            {"hash": TORRENT_HASH, "name": "Example.Release", "tags": "已整理"}
+            {"hash": TORRENT_HASH, "name": "Movie.2024.Remux", "tags": "已整理"}
         ]
-        FakeClient.trackers = [{"url": "https://tracker.example/announce"}]
-
-        result, output, client = self.run_script(self.account())
+        FakeClient.trackers = [{"url": "https://tracker.ptchdbits.co/announce"}]
+        html = """
+            <table>
+              <tr><a href="details.php?id=1" title="Movie.2024.Remux">A</a><div class="circle-text">HR</div></tr>
+            </table>
+        """
+        account = self.account(
+            chdbits_userid="123",
+            cookiecloud_url="https://cookies.example",
+            cookiecloud_uuid="uuid",
+            cookiecloud_password="password",
+        )
+        output = io.StringIO()
+        with (
+            patch.object(qb, "QBittorrentClient", FakeClient),
+            patch.object(qb, "get_cookiecloud_cookies", return_value={"sid": "value"}),
+            patch.object(qb.Script, "get_chdbits_userdetails", return_value=html),
+            patch.dict(os.environ, {}, clear=True),
+            contextlib.redirect_stdout(output),
+        ):
+            result = qb.Script(account).run()
 
         self.assertTrue(result)
-        self.assertEqual(client.delete_calls, [])
-        self.assertIn("[dry-run]", output)
-
-    def test_live_mode_preserves_files_by_default(self):
-        FakeClient.torrents = [
-            {"hash": TORRENT_HASH, "name": "Example.Release", "tags": "已整理"}
-        ]
-        FakeClient.trackers = [{"url": "udp://tracker.example:1337/announce"}]
-
-        result, _output, client = self.run_script(self.account(dry_run=False))
-
-        self.assertTrue(result)
-        self.assertEqual(client.delete_calls, [(TORRENT_HASH, False)])
-        self.assertTrue(client.verify_tls)
+        self.assertEqual(FakeClient.instances[-1].delete_calls, [])
+        self.assertIn("带有 HR 标签，保留", output.getvalue())
 
     def test_tls_verification_can_only_be_disabled_explicitly(self):
         result, _output, client = self.run_script(self.account(verify_tls=False))
@@ -221,40 +217,6 @@ class ScriptSafetyTests(unittest.TestCase):
         ):
             with self.subTest(url=url):
                 self.assertEqual(qb.Script(self.account(url=url)).url, url)
-
-    def test_file_deletion_requires_a_literal_confirmation(self):
-        with self.assertRaisesRegex(ValueError, "delete_files_confirmation"):
-            qb.Script(self.account(delete_files=True, dry_run=False))
-        script = qb.Script(
-            self.account(
-                delete_files=True,
-                delete_files_confirmation="DELETE_FILES",
-                dry_run=False,
-            )
-        )
-        self.assertTrue(script.delete_files)
-
-    def test_file_deletion_also_requires_per_torrent_approval_tag(self):
-        FakeClient.torrents = [
-            {"hash": TORRENT_HASH, "name": "Example.Release", "tags": "已整理"}
-        ]
-        FakeClient.trackers = [{"url": "https://tracker.example/announce"}]
-        account = self.account(
-            dry_run=False,
-            delete_files=True,
-            delete_files_confirmation="DELETE_FILES",
-        )
-
-        result, output, client = self.run_script(account)
-
-        self.assertFalse(result)
-        self.assertEqual(client.delete_calls, [])
-        self.assertIn(qb.FILE_DELETE_APPROVAL_TAG, output)
-
-        FakeClient.torrents[0]["tags"] += f",{qb.FILE_DELETE_APPROVAL_TAG}"
-        result, _output, client = self.run_script(account)
-        self.assertTrue(result)
-        self.assertEqual(client.delete_calls, [(TORRENT_HASH, True)])
 
 
 class MatchingAndParsingTests(unittest.TestCase):
