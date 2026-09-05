@@ -761,12 +761,23 @@ class Script:
                     )
                     if match is None:
                         if match_status == "ambiguous":
-                            print(f"⚠️  种子名存在多个精确匹配，已保留: {name}")
-                        else:
                             print(
-                                f"⚠️  在当前做种列表中未找到唯一精确匹配，已保留: {name}"
+                                f"⚠️  种子名存在多个精确匹配，为安全起见已保留: {name}"
                             )
-                        inspection_failed = True
+                            continue
+
+                        print(
+                            f"🗑️  在 CHDBits 做种列表中未找到该种子（无活跃 HR 做种），准备删除: {name}"
+                        )
+                        print(f"🔍 种子哈希: {hash_value}")
+                        action = self.delete_candidate(hash_value, name, torrent_tags)
+                        if action == "deleted":
+                            deleted_count += 1
+                            deleted_torrents.append(name)
+                        elif action == "planned":
+                            planned_count += 1
+                        else:
+                            inspection_failed = True
                         continue
 
                     _, matched_hr, matched_html_title = match

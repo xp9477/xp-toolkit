@@ -129,15 +129,45 @@ class ScriptSafetyTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(client.delete_calls, [(TORRENT_HASH, False)])
 
-    def test_non_exact_hr_match_never_deletes(self):
+    def test_unmatched_chdbits_torrent_is_deleted(self):
         FakeClient.torrents = [
             {"hash": TORRENT_HASH, "name": "Movie.2024.Remux", "tags": "已整理"}
         ]
         FakeClient.trackers = [{"url": "https://tracker.ptchdbits.co/announce"}]
         html = """
             <table>
-              <tr><a href="details.php?id=1" title="Movie 2024 Remux A">A</a></tr>
-              <tr><a href="details.php?id=2" title="Movie 2024 Remux B">B</a></tr>
+              <tr><a href="details.php?id=1" title="Another.Movie.2024">A</a></tr>
+            </table>
+        """
+        account = self.account(
+            chdbits_userid="123",
+            cookiecloud_url="https://cookies.example",
+            cookiecloud_uuid="uuid",
+            cookiecloud_password="password",
+        )
+        output = io.StringIO()
+        with (
+            patch.object(qb, "QBittorrentClient", FakeClient),
+            patch.object(qb, "get_cookiecloud_cookies", return_value={"sid": "value"}),
+            patch.object(qb.Script, "get_chdbits_userdetails", return_value=html),
+            patch.dict(os.environ, {}, clear=True),
+            contextlib.redirect_stdout(output),
+        ):
+            result = qb.Script(account).run()
+
+        self.assertTrue(result)
+        self.assertEqual(FakeClient.instances[-1].delete_calls, [(TORRENT_HASH, True)])
+        self.assertIn("未找到该种子（无活跃 HR 做种），准备删除", output.getvalue())
+
+    def test_ambiguous_hr_match_is_preserved(self):
+        FakeClient.torrents = [
+            {"hash": TORRENT_HASH, "name": "Movie.2024.Remux", "tags": "已整理"}
+        ]
+        FakeClient.trackers = [{"url": "https://tracker.ptchdbits.co/announce"}]
+        html = """
+            <table>
+              <tr><a href="details.php?id=1" title="Movie.2024.Remux">A</a></tr>
+              <tr><a href="details.php?id=2" title="Movie.2024.Remux">B</a></tr>
             </table>
         """
         account = self.account(
@@ -158,7 +188,7 @@ class ScriptSafetyTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertEqual(FakeClient.instances[-1].delete_calls, [])
-        self.assertIn("未找到唯一精确匹配", output.getvalue())
+        self.assertIn("存在多个精确匹配，为安全起见已保留", output.getvalue())
 
     def test_hr_torrent_is_preserved(self):
         FakeClient.torrents = [
