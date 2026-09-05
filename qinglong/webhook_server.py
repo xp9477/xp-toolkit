@@ -61,8 +61,8 @@ def resolve_task_script(value: str, root: Path = SCRIPT_ROOT) -> Path:
         candidate.relative_to(root)
     except ValueError as exc:
         raise ConfigError("script 必须位于 qinglong 目录内") from exc
-    if candidate.suffix != ".py" or not candidate.is_file():
-        raise ConfigError(f"script 不存在或不是 Python 文件: {candidate.name}")
+    if not candidate.is_file():
+        raise ConfigError(f"script 不存在: {candidate.name}")
     return candidate
 
 
@@ -74,8 +74,8 @@ def load_server_config(root: Path = SCRIPT_ROOT) -> ServerConfig:
     port = _parse_int(raw.get("port", 8001), "port", 1, 65535)
     cooldown = _parse_int(raw.get("cooldown_seconds", 30), "cooldown_seconds", 0, 3600)
     token = str(raw.get("token", "")).strip()
-    if not _is_loopback(bind) and len(token) < 16:
-        raise ConfigError("监听非回环地址时 token 至少需要 16 个字符")
+    if not _is_loopback(bind) and not token:
+        raise ConfigError("监听非回环地址时需要配置 token")
     return ServerConfig(
         bind=bind,
         port=port,
@@ -109,8 +109,11 @@ class TriggerController:
             retry_after = max(1, int(self.config.cooldown_seconds - elapsed + 0.999))
             return 429, "Trigger cooldown is active.", retry_after
         try:
+            cmd = ["task", str(self.config.script)]
+            if self.config.script.suffix == ".sh":
+                cmd = ["bash", str(self.config.script)]
             self.process = subprocess.Popen(
-                ["task", str(self.config.script)],
+                cmd,
                 stdin=subprocess.DEVNULL,
                 close_fds=True,
             )

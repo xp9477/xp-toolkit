@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
 import sys
@@ -46,6 +47,23 @@ def parse_bool(value: Any, *, default: bool, field_name: str) -> bool:
     raise ConfigError(f"{field_name} 必须为布尔值")
 
 
+def is_private_http_origin(value: Any) -> bool:
+    """内网/本机服务地址自动兼容 HTTP。"""
+    try:
+        parsed = urlparse(str(value or "").strip())
+        if parsed.scheme != "http" or not parsed.hostname:
+            return False
+        hostname = parsed.hostname.rstrip(".").lower()
+        if hostname == "localhost" or hostname.endswith(
+            (".local", ".lan", ".home", ".internal", ".home.arpa")
+        ):
+            return True
+        address = ipaddress.ip_address(hostname)
+        return address.is_private or address.is_loopback or address.is_link_local
+    except (ValueError, TypeError):
+        return False
+
+
 def validate_service_origin(
     value: Any,
     *,
@@ -70,7 +88,7 @@ def validate_service_origin(
         _ = parsed.port
     except ValueError as exc:
         raise ConfigError(f"{field_name} 端口无效") from exc
-    if parsed.scheme != "https" and not allow_http:
+    if parsed.scheme != "https" and not (allow_http or is_private_http_origin(raw)):
         raise ConfigError(f"{field_name} 必须使用 HTTPS")
 
     return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")

@@ -15,16 +15,26 @@ import webhook_server
 
 
 class ConfigTests(unittest.TestCase):
-    def test_non_loopback_requires_long_token(self):
+    def test_non_loopback_requires_token(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "job.py").write_text("", encoding="utf-8")
-            raw = '{"bind":"0.0.0.0","script":"job.py","token":"short"}'
+            raw = '{"bind":"0.0.0.0","script":"job.py","token":""}'
             with (
                 patch.dict(os.environ, {"webhook_server": raw}),
                 self.assertRaises(common.ConfigError),
             ):
                 webhook_server.load_server_config(root)
+
+    def test_non_loopback_allows_custom_token_and_shell_scripts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "job.sh").write_text("", encoding="utf-8")
+            raw = '{"bind":"0.0.0.0","script":"job.sh","token":"my-token"}'
+            with patch.dict(os.environ, {"webhook_server": raw}):
+                config = webhook_server.load_server_config(root)
+            self.assertEqual(config.token, "my-token")
+            self.assertEqual(config.script.name, "job.sh")
 
     def test_script_cannot_escape_allowed_root(self):
         with tempfile.TemporaryDirectory() as directory:
