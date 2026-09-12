@@ -24,7 +24,7 @@ class Color {
 const context = vm.createContext({ Color, console });
 vm.runInContext(
   `${source.slice(0, end)}\n` +
-    "globalThis.testApi = { hasAnyAuth, normalizeCpaBaseUrl, cacheScope, authIndexOf, " +
+    "globalThis.testApi = { hasAnyAuth, normalizeCpaBaseUrl, cacheScope, authIndexOf, serviceTapURL, " +
     "findCpaFiles, averageServices, normalizeUsageWindow, parseChatGPTUsage, parseAntigravity };",
   context
 );
@@ -150,4 +150,10 @@ test("remaining percent averages across accounts without counting them", () => {
   const single = api.averageServices([{ ok: true, remainingPct: 77, resetHint: "2天后", extra: "" }]);
   assert.equal(single.remainingPct, 77);
   assert.equal(single.extra, "");
+});
+
+test("service tap URLs directly target native app schemes", () => {
+  assert.equal(api.serviceTapURL("grok"), "grok://");
+  assert.equal(api.serviceTapURL("chatgpt"), "com.openai.chat://");
+  assert.equal(api.serviceTapURL("gemini"), "googlegemini://");
 });

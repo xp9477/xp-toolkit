@@ -3,7 +3,7 @@
 // icon-color: brown; icon-glyph: book;
 //
 // AI Quota — SuperGrok / ChatGPT Plus / Google AI Pro
-// Release: 2026-08-26.1
+// Release: 2026-09-12.1
 // 中号组件：系统背景、官方彩色 logo、Notion / Instapaper 排版。
 //
 // 配置（任选，可叠加）：
@@ -35,17 +35,7 @@ function nativeAppURL(id) {
 }
 
 function serviceTapURL(id) {
-  // On iOS, Grok's `grok://` works when opened by Scriptable but is not
-  // consistently accepted as a direct WidgetKit link. ChatGPT and Gemini
-  // behave the opposite way, so only Grok uses the Scriptable relay.
-  if (id !== "grok") return nativeAppURL(id);
-  try {
-    const base = URLScheme.forRunningScript();
-    const sep = base.indexOf("?") >= 0 ? "&" : "?";
-    return `${base}${sep}open=grok`;
-  } catch (_) {
-    return nativeAppURL(id);
-  }
+  return nativeAppURL(id);
 }
 
 // ---------- Theme ----------
@@ -308,6 +298,7 @@ function friendlyHttpError(e) {
 
 async function loadJSONOnce(url, opts = {}) {
   const req = new Request(url);
+  req.allowInsecureRequest = true;
   req.timeoutInterval = opts.timeout || 20;
   req.method = opts.method || "GET";
   const headers = {
@@ -364,13 +355,20 @@ async function cpaGet(baseUrl, apiKey, path) {
 
 async function cpaApiCall(baseUrl, apiKey, body) {
   const trustedBaseUrl = normalizeCpaBaseUrl(baseUrl);
+  const normalizedBody = Object.assign({}, body);
+  const rawIdx = normalizedBody.authIndex ?? normalizedBody.auth_index;
+  if (rawIdx != null) {
+    const strIdx = String(rawIdx);
+    normalizedBody.auth_index = strIdx;
+    normalizedBody.authIndex = strIdx;
+  }
   return loadJSON(`${trustedBaseUrl}/v0/management/api-call`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body,
+    body: normalizedBody,
     timeout: 30,
   });
 }
@@ -591,17 +589,31 @@ async function fetchAveragedAccounts(files, testers, fetchOne, missingError) {
   const settled = await Promise.all(
     accounts.map(async (file) => {
       try {
-        return await fetchOne(file);
+        const res = await fetchOne(file);
+        return { ok: true, res, file };
       } catch (e) {
-        errors.push(e);
-        return null;
+        errors.push(`${file.name || "account"}: ${e.message || e}`);
+        return { ok: false, error: e, file };
       }
     })
   );
-  if (!settled.some((s) => s && s.ok && s.remainingPct != null)) {
-    throw errors[0] || new Error(missingError);
+  const successful = settled.filter((s) => s && s.ok && s.res && s.res.ok && s.res.remainingPct != null);
+  if (!successful.length) {
+    throw new Error(errors[0] || missingError);
   }
-  return averageServices(settled);
+  const result = averageServices(successful.map((s) => s.res));
+  result.accountCount = successful.length;
+  result.totalAccounts = accounts.length;
+  result.accountDetails = successful.map((s) => ({
+    name: s.file.name || s.file.account || s.file.email || "account",
+    remainingPct: s.res.remainingPct,
+    resetHint: s.res.resetHint,
+    extra: s.res.extra,
+  }));
+  if (errors.length > 0 && errors.length < accounts.length) {
+    result.warnings = errors;
+  }
+  return result;
 }
 
 async function fetchGrokAccount(cfg, xai) {
@@ -638,7 +650,13 @@ async function fetchChatGPTAccount(cfg, openai) {
   const authIndex = authIndexOf(openai);
   if (authIndex == null) throw new Error("CPA 未找到 ChatGPT 认证");
   const accountId =
-    openai.account_id || openai.accountId || openai.chatgpt_account_id || openai.chatgptAccountId || "";
+    openai.account_id ||
+    openai.accountId ||
+    openai.chatgpt_account_id ||
+    openai.chatgptAccountId ||
+    openai.id_token?.chatgpt_account_id ||
+    openai.idToken?.chatgptAccountId ||
+    "";
   const header = {
     Authorization: "Bearer $TOKEN$",
     Accept: "application/json",
@@ -714,7 +732,9 @@ async function fetchAll(cfg) {
   const results = await Promise.all(
     jobs.map(async ([id, fn, name, url]) => {
       try {
-        return [id, await fn(), null];
+        const service = await fn();
+        const errs = service.warnings || [];
+        return [id, service, errs.length ? `${name}: 部分账号获取失败 (${errs.join("; ")})` : null];
       } catch (e) {
         const msg = friendlyHttpError(e);
         return [id, emptyService(id, name, url, msg), `${name}: ${msg}`];
@@ -742,13 +762,13 @@ function mergeCachedService(fresh, cached, id) {
   return fresh[id];
 }
 
-async function getData(cfg) {
+async function getData(cfg, forceRefresh = false) {
   const scope = cacheScope(cfg);
   const loaded = loadCache();
   // 旧缓存没有 scope；地址或 Key 变化时也必须立即失效，避免串账号显示。
   const cached = loaded?.scope === scope ? loaded : null;
   const now = Date.now();
-  if (cached?.data?.fetchedAt) {
+  if (!forceRefresh && cached?.data?.fetchedAt) {
     const age = now - new Date(cached.data.fetchedAt).getTime();
     if (age >= 0 && age < CACHE_TTL_MS) {
       return { data: cached.data, fromCache: true, stale: false };
@@ -756,7 +776,7 @@ async function getData(cfg) {
   }
   try {
     const data = await fetchAll(cfg);
-    if (cached?.data) {
+    if (cached?.data && !forceRefresh) {
       data.grok = mergeCachedService(data, cached.data, "grok");
       data.chatgpt = mergeCachedService(data, cached.data, "chatgpt");
       data.gemini = mergeCachedService(data, cached.data, "gemini");
@@ -941,6 +961,7 @@ function addServiceColumn(parent, svc, opts = {}) {
   const title = col.addStack();
   title.layoutHorizontally();
   title.centerAlignContent();
+  title.url = serviceTapURL(svc.id);
   sp(title);
   const logo = logoFor(svc.id, logoSize);
   if (logo) {
@@ -956,6 +977,7 @@ function addServiceColumn(parent, svc, opts = {}) {
 
   const ringRow = col.addStack();
   ringRow.layoutHorizontally();
+  ringRow.url = serviceTapURL(svc.id);
   sp(ringRow);
   addFixedImage(
     ringRow,
@@ -970,6 +992,7 @@ function addServiceColumn(parent, svc, opts = {}) {
   const hintRow = col.addStack();
   hintRow.layoutHorizontally();
   hintRow.centerAlignContent();
+  hintRow.url = serviceTapURL(svc.id);
   sp(hintRow);
   const sub = t(hintRow, hint, { size: 10, color: UI.muted, lines: 1 });
   sub.minimumScaleFactor = 0.75;
@@ -1058,10 +1081,19 @@ async function presentPreviewMenu(data, cfg) {
   a.title = "AI Quota";
   const lines = ordered(data).map((s) => {
     const left = s.remainingPct == null ? "—" : `${Math.round(s.remainingPct)}% 剩余`;
-    return `${s.name}  ${left}  ${rowMeta(s)}`;
+    const countInfo = s.accountCount && s.accountCount > 1 ? ` (${s.accountCount}账号均值)` : "";
+    let line = `${s.name}${countInfo}  ${left}  ${rowMeta(s)}`;
+    if (s.accountDetails && s.accountDetails.length > 1) {
+      const details = s.accountDetails
+        .map((d) => `  · ${d.name}: ${Math.round(d.remainingPct)}%`)
+        .join("\n");
+      line += `\n${details}`;
+    }
+    return line;
   });
   const extra = (data.errors || []).join("\n");
-  a.message = `${lines.join("\n")}${extra ? `\n\n${extra}` : ""}`;
+  a.message = `${lines.join("\n\n")}${extra ? `\n\n⚠️ ${extra}` : ""}`;
+  a.addAction("强制刷新");
   a.addAction("预览小号");
   a.addAction("预览中号");
   a.addAction("预览大号");
@@ -1069,10 +1101,13 @@ async function presentPreviewMenu(data, cfg) {
   a.addAction("配置 CPA");
   a.addCancelAction("完成");
   const i = await a.present();
-  if (i === 0) await buildSmall(data).presentSmall();
-  else if (i === 1) await buildMedium(data).presentMedium();
-  else if (i === 2) await buildLarge(data).presentLarge();
-  else if (i === 3) {
+  if (i === 0) {
+    const fresh = await getData(cfg, true);
+    await presentPreviewMenu(fresh.data, cfg);
+  } else if (i === 1) await buildSmall(data).presentSmall();
+  else if (i === 2) await buildMedium(data).presentMedium();
+  else if (i === 3) await buildLarge(data).presentLarge();
+  else if (i === 4) {
     const test = new Alert();
     test.title = "测试 App 跳转";
     test.message = "选择后会直接打开对应 App，不使用任何网页回退。";
@@ -1085,10 +1120,10 @@ async function presentPreviewMenu(data, cfg) {
       const id = ["grok", "chatgpt", "gemini"][appIndex];
       Safari.open(nativeAppURL(id));
     }
-  } else if (i === 4) {
+  } else if (i === 5) {
     const next = await configureInteractive(cfg);
     if (hasAnyAuth(next)) {
-      const fresh = await getData(next);
+      const fresh = await getData(next, true);
       await presentPreviewMenu(fresh.data, next);
     }
   }
@@ -1096,8 +1131,8 @@ async function presentPreviewMenu(data, cfg) {
 
 async function main() {
   const openId = args.queryParameters && args.queryParameters.open;
-  if (openId === "grok") {
-    Safari.open(URLS.grok);
+  if (openId) {
+    Safari.open(nativeAppURL(openId));
     return;
   }
 
@@ -1117,7 +1152,8 @@ async function main() {
   }
 
   try {
-    const { data, stale, error } = await getData(cfg);
+    const forceRefresh = !config.runsInWidget;
+    const { data, stale, error } = await getData(cfg, forceRefresh);
     if (stale && error) {
       data.errors = [`缓存 ${error.message || error}`, ...(data.errors || [])];
     }
