@@ -40,12 +40,19 @@ class FakeSession:
         self.login_text = login_text
         self.get_count = 0
 
-    def get(self, _url, **_kwargs):
+    def get(self, url, **kwargs):
         self.get_count += 1
         if self.get_count == 1:
             return FakeResponse(
                 '<input name="formhash" value="login123">', error=self.first_error
             )
+        params = kwargs.get("params") or {}
+        if "operation=qiandao" in str(url) or params.get("operation") == "qiandao":
+            return FakeResponse(self.final_text)
+        if "k_misign:sign" in str(url):
+            if self.get_count <= 2:
+                return FakeResponse('<a href="?formhash=sign456">签到</a>')
+            return FakeResponse(self.verify_text)
         if self.get_count == 2:
             return FakeResponse('<a href="?formhash=sign456">签到</a>')
         if self.get_count == 3:
@@ -103,6 +110,32 @@ class MtForumResponseTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "访问登录页面失败"):
             make_script(session).run()
         self.assertEqual(session.get_count, 1)
+
+    def test_busy_response_retries_and_succeeds(self):
+        class RetrySuccessSession(FakeSession):
+            def __init__(self):
+                super().__init__(final_text="")
+                self.sign_attempts = 0
+
+            def get(self, url, **kwargs):
+                self.get_count += 1
+                if self.get_count == 1:
+                    return FakeResponse('<input name="formhash" value="login123">')
+                params = kwargs.get("params") or {}
+                if "operation=qiandao" in str(url) or params.get("operation") == "qiandao":
+                    self.sign_attempts += 1
+                    if self.sign_attempts == 1:
+                        return FakeResponse("<![CDATA[请稍后再试]]>")
+                    return FakeResponse("<![CDATA[签到成功]]>")
+                if "k_misign:sign" in str(url):
+                    if self.sign_attempts == 0:
+                        return FakeResponse('<a href="?formhash=sign456">签到</a>')
+                    return FakeResponse("")
+                return FakeResponse("")
+
+        session = RetrySuccessSession()
+        self.assertTrue(make_script(session).run())
+        self.assertEqual(session.sign_attempts, 2)
 
 
 if __name__ == "__main__":

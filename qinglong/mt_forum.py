@@ -10,6 +10,8 @@ env:
 from __future__ import annotations
 
 import re
+import sys
+import time
 
 import notify
 import requests
@@ -26,12 +28,22 @@ class Script:
         require_fields(account, "username", "password")
         self.session = requests.Session()
         self.base_url = "https://bbs.binmt.cc"
+        default_delay = 0.0 if "unittest" in sys.modules else 2.0
+        self.retry_delay = float(account.get("retry_delay", default_delay))
+        self.max_retries = int(account.get("max_retries", 3))
 
     @staticmethod
     def _signed_page(text: str) -> bool:
         return any(
             marker in text
-            for marker in ("您的签到排名", "今日已签", "已累计签到", "已经签到")
+            for marker in (
+                "您的签到排名",
+                "今日已签",
+                "已累计签到",
+                "已经签到",
+                "今日已经签到",
+                "btnvisted",
+            )
         )
 
     @staticmethod
@@ -144,7 +156,7 @@ class Script:
             self._fail("签到页面未找到 formhash")
         print("登录成功")
 
-        # 4. 执行签到 AJAX 请求
+        # 4. 执行签到 AJAX 请求（带重试与频控防护）
         params = {
             "id": "k_misign:sign",
             "operation": "qiandao",
@@ -153,56 +165,88 @@ class Script:
             "inajax": "1",
             "ajaxtarget": "midaben_sign",
         }
+        sign_headers = {
+            "Referer": f"{self.base_url}/plugin.php?id=k_misign:sign",
+            "X-Requested-With": "XMLHttpRequest",
+        }
 
-        try:
-            r4 = self.session.get(
-                f"{self.base_url}/plugin.php",
-                params=params,
-                headers={"Referer": f"{self.base_url}/plugin.php?id=k_misign:sign"},
-                timeout=15,
-            )
-            r4.raise_for_status()
-            r4.encoding = "utf-8"
-        except Exception as e:
-            self._fail(f"发送签到请求失败: {e}")
+        # 模拟真人正常浏览停顿，避免两步请求过于紧凑触发论坛防刷机制
+        if self.retry_delay > 0:
+            time.sleep(self.retry_delay)
 
-        # 提取并美化签到提示信息
-        sign_cdata = re.search(r"<!\[CDATA\[(.*?)\]\]>", r4.text, re.DOTALL)
-        sign_msg_raw = sign_cdata.group(1) if sign_cdata else ""
-        sign_msg_no_html = re.sub(
-            r"<script.*?>.*?</script>", "", sign_msg_raw, flags=re.DOTALL
-        )
-        sign_msg_no_html = re.sub(r"<.*?>", "", sign_msg_no_html)
+        last_sign_msg = "未知结果"
+        retry_markers = ("请稍后再试", "系统繁忙", "过于频繁", "请稍后")
 
-        lines = []
-        for line in sign_msg_no_html.splitlines():
-            line_str = line.strip()
-            # 过滤空行、纯数字、以及形如 "2195人" 的签到排名信息
-            if not line_str or line_str.isdigit() or re.match(r"^\d+人$", line_str):
+        for attempt in range(self.max_retries):
+            if attempt > 0:
+                print(
+                    f"签到触发临时限制（{last_sign_msg}），等待重试 ({attempt + 1}/{self.max_retries})..."
+                )
+                if self.retry_delay > 0:
+                    time.sleep(self.retry_delay)
+
+            try:
+                r4 = self.session.get(
+                    f"{self.base_url}/plugin.php",
+                    params=params,
+                    headers=sign_headers,
+                    timeout=15,
+                )
+                r4.raise_for_status()
+                r4.encoding = "utf-8"
+            except Exception as e:
+                if attempt == self.max_retries - 1:
+                    self._fail(f"发送签到请求失败: {e}")
+                print(f"发送签到请求异常: {e}，准备重试...")
                 continue
-            line_str = re.sub(r"和\s*。", "。", line_str)
-            lines.append(line_str)
 
-        sign_msg = " | ".join(lines) if lines else "未知结果"
-
-        success_markers = ("签到成功", "今日已签", "已经签到", "已签到")
-        if any(marker in r4.text for marker in success_markers):
-            print(f"签到成功！提示: {sign_msg}")
-            return True
-
-        # Discuz 插件版本的 AJAX 成功文案并不统一；用登录后的签到页状态做最终确认。
-        try:
-            verify = self.session.get(
-                f"{self.base_url}/plugin.php?id=k_misign:sign", timeout=15
+            # 提取并美化签到提示信息
+            sign_cdata = re.search(r"<!\[CDATA\[(.*?)\]\]>", r4.text, re.DOTALL)
+            sign_msg_raw = sign_cdata.group(1) if sign_cdata else ""
+            sign_msg_no_html = re.sub(
+                r"<script.*?>.*?</script>", "", sign_msg_raw, flags=re.DOTALL
             )
-            verify.raise_for_status()
-            verify.encoding = "utf-8"
-        except Exception as e:
-            self._fail(f"签到结果不明确且复核失败: {e}")
-        if self._signed_page(verify.text):
-            print(f"签到成功（页面复核）；提示: {sign_msg}")
-            return True
-        self._fail(f"签到失败: {sign_msg}")
+            sign_msg_no_html = re.sub(r"<.*?>", "", sign_msg_no_html)
+
+            lines = []
+            for line in sign_msg_no_html.splitlines():
+                line_str = line.strip()
+                # 过滤空行、纯数字、以及形如 "2195人" 的签到排名信息
+                if not line_str or line_str.isdigit() or re.match(r"^\d+人$", line_str):
+                    continue
+                line_str = re.sub(r"和\s*。", "。", line_str)
+                lines.append(line_str)
+
+            sign_msg = " | ".join(lines) if lines else "未知结果"
+            last_sign_msg = sign_msg
+
+            success_markers = ("签到成功", "今日已签", "已经签到", "已签到")
+            if any(marker in r4.text for marker in success_markers):
+                print(f"签到成功！提示: {sign_msg}")
+                return True
+
+            # Discuz 插件版本的 AJAX 成功文案并不统一；用登录后的签到页状态做最终确认。
+            try:
+                verify = self.session.get(
+                    f"{self.base_url}/plugin.php?id=k_misign:sign", timeout=15
+                )
+                verify.raise_for_status()
+                verify.encoding = "utf-8"
+            except Exception as e:
+                if attempt == self.max_retries - 1:
+                    self._fail(f"签到结果不明确且复核失败: {e}")
+                print(f"签到复核异常: {e}，准备重试...")
+                continue
+
+            if self._signed_page(verify.text):
+                print(f"签到成功（页面复核）；提示: {sign_msg}")
+                return True
+
+            # 若遇到明确的临时繁忙/请稍后再试标记，且还有重试次数，则继续下一次尝试
+            if not any(marker in r4.text for marker in retry_markers):
+                break
+
+        self._fail(f"签到失败: {last_sign_msg}")
 
 
 def main() -> int:
