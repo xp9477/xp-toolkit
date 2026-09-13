@@ -157,3 +157,16 @@ test("service tap URLs directly target native app schemes", () => {
   assert.equal(api.serviceTapURL("chatgpt"), "com.openai.chat://");
   assert.equal(api.serviceTapURL("gemini"), "googlegemini://");
 });
+
+test("reset hint chooses the earliest/fastest refreshing account", () => {
+  const now = Date.now();
+  const res = api.averageServices([
+    { ok: true, remainingPct: 15, resetAt: now + 500000000, resetHint: "5天后", extra: "5小时剩 0%" },
+    { ok: true, remainingPct: 85, resetAt: now + 3600000, resetHint: "1小时后", extra: "" },
+    { ok: true, remainingPct: 50, resetAt: now + 86400000, resetHint: "1天后", extra: "" },
+  ]);
+  assert.equal(res.remainingPct, 50);
+  assert.equal(res.usedPct, 50);
+  assert.equal(res.resetHint, "1小时后");
+  assert.equal(res.resetAt, now + 3600000);
+});

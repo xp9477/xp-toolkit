@@ -242,12 +242,13 @@ function formatResetMs(ms) {
   return `${Math.max(1, mins)}分钟后`;
 }
 
-function parseResetHint(isoOrMs, description) {
-  let end = null;
+function parseResetTimeMs(isoOrMs, description) {
   if (isoOrMs != null) {
+    let end;
     if (typeof isoOrMs === "number") end = new Date(isoOrMs < 1e12 ? isoOrMs * 1000 : isoOrMs);
     else end = new Date(isoOrMs);
-    if (!Number.isNaN(end.getTime())) return formatResetMs(end.getTime() - Date.now());
+    const ms = end.getTime();
+    if (!Number.isNaN(ms)) return ms;
   }
   if (description) {
     const src = String(description);
@@ -258,8 +259,16 @@ function parseResetHint(isoOrMs, description) {
       const days = d ? Number(d[1]) : 0;
       const hours = h ? Number(h[1]) : 0;
       const mins = m ? Number(m[1]) : 0;
-      return formatResetMs(((days * 24 + hours) * 60 + mins) * 60000);
+      return Date.now() + ((days * 24 + hours) * 60 + mins) * 60000;
     }
+  }
+  return null;
+}
+
+function parseResetHint(isoOrMs, description) {
+  const ms = parseResetTimeMs(isoOrMs, description);
+  if (ms != null) {
+    return formatResetMs(ms - Date.now());
   }
   return null;
 }
@@ -273,6 +282,7 @@ function emptyService(id, name, url, note) {
     usedPct: null,
     windowLabel: note || "未配置",
     resetHint: "",
+    resetAt: null,
     extra: "",
     url,
     ok: false,
@@ -433,6 +443,7 @@ function parseGrokBilling(body) {
     usedPct,
     windowLabel: "本周",
     resetHint: parseResetHint(periodEnd),
+    resetAt: parseResetTimeMs(periodEnd),
     extra: "",
     url: URLS.grok,
     ok: remainingPct != null,
@@ -474,6 +485,7 @@ function normalizeUsageWindow(win) {
     remainingPct: clampPct(100 - usedPercent),
     seconds: Number.isFinite(seconds) ? seconds : null,
     resetHint: parseResetHint(win.reset_at),
+    resetAt: parseResetTimeMs(win.reset_at),
     label: windowLabelFromSeconds(seconds),
     latent: isLatentWindow(win),
   };
@@ -502,6 +514,7 @@ function parseChatGPTUsage(usage) {
       usedPct,
       windowLabel: "额度",
       resetHint: parseResetHint(lim.reset_at),
+      resetAt: parseResetTimeMs(lim.reset_at),
       extra: "",
       url: URLS.chatgpt,
       ok: remainingPct != null,
@@ -522,6 +535,7 @@ function parseChatGPTUsage(usage) {
     usedPct: weekly.usedPct,
     windowLabel: weekly.label,
     resetHint: weekly.resetHint,
+    resetAt: weekly.resetAt,
     extra: other ? `${other.label}剩 ${Math.round(other.remainingPct)}%` : "",
     url: URLS.chatgpt,
     ok: weekly.remainingPct != null,
@@ -540,7 +554,8 @@ function parseAntigravity(body) {
         id: `${b.bucketId || ""} ${g.displayName || ""} ${b.displayName || ""}`,
         remainingPct,
         usedPct: clampPct(100 - remainingPct),
-        resetHint: parseResetHint(b.resetTime || b.reset_time),
+        resetHint: parseResetHint(b.resetTime || b.reset_time, b.description),
+        resetAt: parseResetTimeMs(b.resetTime || b.reset_time, b.description),
         label: b.displayName || g.displayName || "额度",
       });
     }
@@ -560,6 +575,7 @@ function parseAntigravity(body) {
     usedPct: weekly.usedPct,
     windowLabel: "本周",
     resetHint: weekly.resetHint,
+    resetAt: weekly.resetAt,
     extra: "",
     url: URLS.gemini,
     ok: weekly.remainingPct != null,
@@ -574,9 +590,16 @@ function averageServices(services) {
     ok.reduce((sum, s) => sum + Number(s.remainingPct), 0) / ok.length
   );
   const bottleneck = ok.slice().sort((a, b) => a.remainingPct - b.remainingPct)[0];
+  const withReset = ok.filter((s) => s.resetAt != null && Number.isFinite(s.resetAt));
+  const earliestReset = withReset.length
+    ? withReset.slice().sort((a, b) => a.resetAt - b.resetAt)[0]
+    : bottleneck;
+
   return Object.assign({}, bottleneck, {
     remainingPct,
     usedPct: remainingPct == null ? null : clampPct(100 - remainingPct),
+    resetHint: earliestReset.resetHint || bottleneck.resetHint || "",
+    resetAt: earliestReset.resetAt ?? bottleneck.resetAt ?? null,
     extra: bottleneck.extra || "",
     ok: remainingPct != null,
   });
@@ -608,6 +631,7 @@ async function fetchAveragedAccounts(files, testers, fetchOne, missingError) {
     name: s.file.name || s.file.account || s.file.email || "account",
     remainingPct: s.res.remainingPct,
     resetHint: s.res.resetHint,
+    resetAt: s.res.resetAt,
     extra: s.res.extra,
   }));
   if (errors.length > 0 && errors.length < accounts.length) {
@@ -1085,7 +1109,7 @@ async function presentPreviewMenu(data, cfg) {
     let line = `${s.name}${countInfo}  ${left}  ${rowMeta(s)}`;
     if (s.accountDetails && s.accountDetails.length > 1) {
       const details = s.accountDetails
-        .map((d) => `  · ${d.name}: ${Math.round(d.remainingPct)}%`)
+        .map((d) => `  · ${d.name}: ${Math.round(d.remainingPct)}%${d.resetHint ? ` (${d.resetHint})` : ""}`)
         .join("\n");
       line += `\n${details}`;
     }
