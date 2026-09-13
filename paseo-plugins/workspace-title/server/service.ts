@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { ChildProcess } from "node:child_process";
-import { formatMMDD, isFormattedTitle, buildTitle } from "../shared/formatter";
+import { formatMMDD, isFormattedTitle, parseFormattedTitle, buildTitle } from "../shared/formatter";
 import { analyzeWorkspaceTask } from "./analyzer";
 import { WorkspaceTitleStore } from "./store";
 import type { WorkspaceTitlePluginConfig } from "../shared/types";
@@ -216,13 +216,25 @@ export class WorkspaceTitleService {
       return false;
     }
 
-    // 2. Check if already formatted (Idempotency)
-    if (isFormattedTitle(currentTitle)) {
-      this.store.recordNamed(workspaceId, currentTitle!);
-      return false;
+    // 2. Resolve root/primary agent for the workspace first
+    const rootAgent = await this.resolveRootAgent(workspaceId);
+
+    // 3. Check if already formatted (Idempotency)
+    const parsed = parseFormattedTitle(currentTitle);
+    if (parsed) {
+      // Check if user context is Chinese but existing title topic was in English
+      const hasChineseContext =
+        (rootAgent && /[\u4e00-\u9fa5]/.test(rootAgent.title || "")) ||
+        /[\u4e00-\u9fa5]/.test(workspace.name || "");
+      const isEnglishTopic = !/[\u4e00-\u9fa5]/.test(parsed.topic);
+
+      if (!(hasChineseContext && isEnglishTopic)) {
+        this.store.recordNamed(workspaceId, currentTitle!);
+        return false;
+      }
     }
 
-    // 3. Check user manual rename protection
+    // 4. Check user manual rename protection
     const state = this.store.get(workspaceId);
     if (state?.status === "manual") {
       return false;
@@ -234,8 +246,6 @@ export class WorkspaceTitleService {
       currentTitle &&
       currentTitle !== state.assignedTitle
     ) {
-      // The workspace was previously named by our plugin, and the title has changed
-      // to something else not matching our assignedTitle -> user manually edited it!
       console.log(
         `[workspace-title] User manual title detected on ${workspaceId}: "${currentTitle}". Protecting.`
       );
@@ -243,13 +253,11 @@ export class WorkspaceTitleService {
       return false;
     }
 
-    // 4. Check retry limit
+    // 5. Check retry limit
     if (!this.store.canAttempt(workspaceId, this.config.maxRetries)) {
       return false;
     }
 
-    // 5. Resolve root/primary agent for the workspace
-    const rootAgent = await this.resolveRootAgent(workspaceId);
     if (!rootAgent) {
       // Workspace has no agents yet. Do not penalize or exhaust retries.
       return false;

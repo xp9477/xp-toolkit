@@ -45,6 +45,7 @@ export function isValidType(type: string): type is WorkspaceTaskType {
 
 /**
  * Clean and normalize the topic:
+ * - Remove any existing MMDD | 类型 | prefix (strips repeated prefixes completely)
  * - Remove redundant project name mentions
  * - Strip quotes, markdown, and extra whitespace
  * - Ensure reasonable length
@@ -58,6 +59,11 @@ export function cleanTopic(
   }
 
   let topic = rawTopic.trim();
+
+  // Strip all repeated MMDD | 类型 | prefixes
+  while (/^\d{4}\s*\|\s*[^|]+\s*\|\s*/.test(topic)) {
+    topic = topic.replace(/^\d{4}\s*\|\s*[^|]+\s*\|\s*/, "").trim();
+  }
 
   // Strip markdown formatting & backticks
   topic = topic.replace(/[`*_~#]/g, "").trim();
@@ -127,11 +133,13 @@ export function parseFormattedTitle(
   if (!match) {
     return null;
   }
-  const [, mmdd, type, topic] = match;
+  const [, mmdd, type, rawTopic] = match;
   if (!isValidType(type)) {
     return null;
   }
-  return { mmdd, type, topic: topic.trim() };
+  // Also clean the topic of any internal prefixes
+  const topic = cleanTopic(rawTopic);
+  return { mmdd, type, topic };
 }
 
 /**

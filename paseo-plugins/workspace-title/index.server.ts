@@ -31,6 +31,8 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(recheckWorkspaceTitleRpc, async ({ workspaceId }, { paseo }) => {
     if (serviceInstance) {
+      serviceInstance.getStore().resetWorkspace(workspaceId);
+      // Run renaming logic
       await serviceInstance.processWorkspaceById(workspaceId);
     }
     const handle = paseo.workspaces.ref(workspaceId);

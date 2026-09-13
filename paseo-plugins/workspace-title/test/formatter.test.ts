@@ -64,6 +64,10 @@ test("cleanTopic strips markdown, extra whitespaces and redundant project names"
     cleanTopic("`**代码格式化**` 与   规范检查"),
     "代码格式化 与 规范检查"
   );
+  assert.equal(
+    cleanTopic("0913 | 功能 | 0913 | 功能 | Enable unattended background"),
+    "Enable unattended background"
+  );
 });
 
 test("isFormattedTitle correctly detects standard compliant titles", () => {

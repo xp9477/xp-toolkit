@@ -23,7 +23,11 @@ export class WorkspaceTitleStore {
     return this.states.get(workspaceId);
   }
 
-  public canAttempt(workspaceId: string, maxRetries = 3): boolean {
+  public canAttempt(
+    workspaceId: string,
+    maxRetries = 3,
+    retryCooldownMs = 60000
+  ): boolean {
     const existing = this.states.get(workspaceId);
     if (!existing) return true;
     if (
@@ -33,7 +37,25 @@ export class WorkspaceTitleStore {
     ) {
       return false;
     }
+    if (existing.status === "failed") {
+      // If failed more than cooldown ago, allow a fresh retry attempt
+      if (Date.now() - existing.lastAttemptAt > retryCooldownMs) {
+        existing.attempts = 0;
+        existing.status = "pending";
+        return true;
+      }
+    }
     return existing.attempts < maxRetries;
+  }
+
+  public resetWorkspace(workspaceId: string): void {
+    const existing = this.states.get(workspaceId);
+    if (existing) {
+      existing.attempts = 0;
+      existing.status = "pending";
+      delete existing.reason;
+      this.scheduleSave();
+    }
   }
 
   public recordAttempt(workspaceId: string, originalTitle?: string): number {
