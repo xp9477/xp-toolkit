@@ -1,7 +1,7 @@
-import { type PluginWorkspacePanelProps, useWorkspace } from "@getpaseo/plugin";
+import { type PluginWorkspacePanelProps, useWorkspace } from "@getpaseo/plugin/client";
 import { useMemo } from "react";
 import { Text, View } from "react-native";
-import { isFormattedTitle, parseFormattedTitle } from "./src/formatter";
+import { isFormattedTitle, parseFormattedTitle } from "../shared/formatter";
 
 export function WorkspaceTitleOverview({
   theme,

@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { ChildProcess } from "node:child_process";
-import { formatMMDD, isFormattedTitle, buildTitle } from "./formatter";
+import { formatMMDD, isFormattedTitle, buildTitle } from "../shared/formatter";
 import { analyzeWorkspaceTask } from "./analyzer";
 import { WorkspaceTitleStore } from "./store";
-import type { WorkspaceTitlePluginConfig } from "./types";
+import type { WorkspaceTitlePluginConfig } from "../shared/types";
 
 export class WorkspaceTitleService {
   private store: WorkspaceTitleStore;

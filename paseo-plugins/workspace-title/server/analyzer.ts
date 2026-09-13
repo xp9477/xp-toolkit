@@ -3,8 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { promisify } from "node:util";
-import { ALLOWED_TYPES, type ClassificationResult, type WorkspaceTaskType } from "./types";
-import { cleanTopic, isValidType } from "./formatter";
+import { ALLOWED_TYPES, type ClassificationResult, type WorkspaceTaskType } from "../shared/types";
+import { cleanTopic, isValidType } from "../shared/formatter";
 
 const execFileAsync = promisify(execFile);
 

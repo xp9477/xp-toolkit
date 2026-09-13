@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { WorkspaceTitleService } from "../src/service";
-import { WorkspaceTitleStore } from "../src/store";
+import { WorkspaceTitleService } from "../server/service";
+import { WorkspaceTitleStore } from "../server/store";
 
 function createMockService(options?: {
   workspacesJson?: any[];

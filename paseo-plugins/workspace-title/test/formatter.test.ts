@@ -7,7 +7,7 @@ import {
   isFormattedTitle,
   parseFormattedTitle,
   buildTitle,
-} from "../src/formatter";
+} from "../shared/formatter";
 
 test("formatMMDD handles Asia/Shanghai midnight rollover accurately", () => {
   // UTC 15:59:59.999Z -> 23:59:59.999 in Shanghai -> 0912

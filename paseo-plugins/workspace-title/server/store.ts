@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import type { WorkspaceRecordState, WorkspaceStateStatus } from "./types";
+import type { WorkspaceRecordState, WorkspaceStateStatus } from "../shared/types";
 
 export class WorkspaceTitleStore {
   private states = new Map<string, WorkspaceRecordState>();

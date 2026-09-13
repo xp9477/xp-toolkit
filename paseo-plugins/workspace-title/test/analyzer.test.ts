@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyHeuristic, analyzeWorkspaceTask } from "../src/analyzer";
+import { classifyHeuristic, analyzeWorkspaceTask } from "../server/analyzer";
 
 test("classifyHeuristic accurately recognizes all 8 allowed types", () => {
   const cases: Array<{ input: string; expectedType: string; project?: string }> = [
