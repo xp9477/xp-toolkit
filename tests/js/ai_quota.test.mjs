@@ -170,3 +170,44 @@ test("reset hint chooses the earliest/fastest refreshing account", () => {
   assert.equal(res.resetHint, "1小时后");
   assert.equal(res.resetAt, now + 3600000);
 });
+
+test("ChatGPT parser extracts 5-hour window information", () => {
+  const parsed = api.parseChatGPTUsage({
+    plan_type: "plus",
+    rate_limit: {
+      primary_window: { used_percent: 20, limit_window_seconds: 18000, reset_at: "2030-01-01T05:00:00Z" },
+      secondary_window: { used_percent: 40, limit_window_seconds: 604800, reset_at: "2030-01-07T00:00:00Z" },
+    },
+  });
+  assert.equal(parsed.remainingPct, 60);
+  assert.equal(parsed.remaining5hPct, 80);
+  assert.ok(parsed.reset5hHint);
+});
+
+test("Google parser extracts 5-hour bucket information", () => {
+  const parsed = api.parseAntigravity({
+    groups: [
+      {
+        displayName: "Gemini Models",
+        buckets: [
+          { bucketId: "gemini-weekly", displayName: "Weekly Limit Remaining", remainingFraction: 0.9, resetTime: "2030-01-07T00:00:00Z" },
+          { bucketId: "gemini-5h", displayName: "Five Hour Limit Remaining", remainingFraction: 0.85, resetTime: "2030-01-01T04:00:00Z" }
+        ]
+      }
+    ]
+  });
+  assert.equal(parsed.remainingPct, 90);
+  assert.equal(parsed.remaining5hPct, 85);
+  assert.ok(parsed.reset5hHint);
+});
+
+test("averageServices computes 5-hour averages and earliest 5h cooldown", () => {
+  const now = Date.now();
+  const res = api.averageServices([
+    { ok: true, remainingPct: 80, resetAt: now + 500000, resetHint: "5天后", remaining5hPct: 70, reset5hAt: now + 7200000, reset5hHint: "2小时后" },
+    { ok: true, remainingPct: 60, resetAt: now + 300000, resetHint: "3天后", remaining5hPct: 90, reset5hAt: now + 3600000, reset5hHint: "1小时后" },
+  ]);
+  assert.equal(res.remainingPct, 70);
+  assert.equal(res.remaining5hPct, 80);
+  assert.equal(res.reset5hHint, "1小时后");
+});

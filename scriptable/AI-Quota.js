@@ -3,7 +3,7 @@
 // icon-color: brown; icon-glyph: book;
 //
 // AI Quota — SuperGrok / ChatGPT Plus / Google AI Pro
-// Release: 2026-09-12.1
+// Release: 2026-09-15.1
 // 中号组件：系统背景、官方彩色 logo、Notion / Instapaper 排版。
 //
 // 配置（任选，可叠加）：
@@ -79,6 +79,28 @@ function accentFor(remainingPct) {
   if (remainingPct <= 8) return bad();
   if (remainingPct <= 22) return warn();
   return ok();
+}
+
+function ok5h() {
+  return isDark() ? new Color("#38BDF8") : new Color("#0284C7");
+}
+
+function accentFor5h(remainingPct) {
+  if (remainingPct == null) return faint();
+  if (remainingPct <= 8) return bad();
+  if (remainingPct <= 22) return warn();
+  return ok5h();
+}
+
+function shortenHint(hint) {
+  if (!hint) return "";
+  let s = String(hint).trim();
+  if (s === "即将重置" || s === "满") return s;
+  s = s.replace(/后$/, "");
+  s = s.replace(/小时/g, "h ");
+  s = s.replace(/分(?:钟)?/g, "m ");
+  s = s.replace(/\s+/g, "").trim();
+  return s ? `${s}后` : hint;
 }
 
 function displayFont(size) {
@@ -283,6 +305,9 @@ function emptyService(id, name, url, note) {
     windowLabel: note || "未配置",
     resetHint: "",
     resetAt: null,
+    remaining5hPct: null,
+    reset5hHint: null,
+    reset5hAt: null,
     extra: "",
     url,
     ok: false,
@@ -444,6 +469,9 @@ function parseGrokBilling(body) {
     windowLabel: "本周",
     resetHint: parseResetHint(periodEnd),
     resetAt: parseResetTimeMs(periodEnd),
+    remaining5hPct: null,
+    reset5hHint: null,
+    reset5hAt: null,
     extra: "",
     url: URLS.grok,
     ok: remainingPct != null,
@@ -526,7 +554,23 @@ function parseChatGPTUsage(usage) {
   const weekly =
     windows.find((w) => w.seconds != null && w.seconds >= 6 * 24 * 3600) ||
     windows.slice().sort((a, b) => (b.seconds || 0) - (a.seconds || 0))[0];
-  const other = windows.find((w) => w !== weekly && !w.latent);
+  const win5h = windows.find((w) => w !== weekly && w.seconds != null && w.seconds <= 24 * 3600);
+
+  let remaining5hPct = null;
+  let reset5hHint = null;
+  let reset5hAt = null;
+
+  if (win5h) {
+    remaining5hPct = win5h.remainingPct;
+    if (win5h.usedPct === 0) {
+      reset5hHint = "满";
+      reset5hAt = null;
+    } else {
+      reset5hHint = win5h.resetHint;
+      reset5hAt = win5h.resetAt;
+    }
+  }
+
   return {
     id: "chatgpt",
     name: "ChatGPT",
@@ -536,7 +580,10 @@ function parseChatGPTUsage(usage) {
     windowLabel: weekly.label,
     resetHint: weekly.resetHint,
     resetAt: weekly.resetAt,
-    extra: other ? `${other.label}剩 ${Math.round(other.remainingPct)}%` : "",
+    remaining5hPct,
+    reset5hHint,
+    reset5hAt,
+    extra: win5h ? `${win5h.label}剩 ${Math.round(win5h.remainingPct)}%` : "",
     url: URLS.chatgpt,
     ok: weekly.remainingPct != null,
   };
@@ -567,6 +614,23 @@ function parseAntigravity(body) {
     pool.find((b) => /week|weekly|周/i.test(`${b.id} ${b.label}`)) ||
     pool.find((b) => /week|weekly|周/i.test(b.resetHint || "")) ||
     pool[0];
+  const bucket5h = pool.find((b) => b !== weekly && (/5h|hour|小时/i.test(`${b.id} ${b.label}`) || b.bucketId === "gemini-5h"));
+
+  let remaining5hPct = null;
+  let reset5hHint = null;
+  let reset5hAt = null;
+
+  if (bucket5h) {
+    remaining5hPct = bucket5h.remainingPct;
+    if (bucket5h.remainingPct >= 99.9) {
+      reset5hHint = "满";
+      reset5hAt = null;
+    } else {
+      reset5hHint = bucket5h.resetHint;
+      reset5hAt = bucket5h.resetAt;
+    }
+  }
+
   return {
     id: "gemini",
     name: "Gemini",
@@ -576,7 +640,10 @@ function parseAntigravity(body) {
     windowLabel: "本周",
     resetHint: weekly.resetHint,
     resetAt: weekly.resetAt,
-    extra: "",
+    remaining5hPct,
+    reset5hHint,
+    reset5hAt,
+    extra: bucket5h ? `5小时剩 ${Math.round(bucket5h.remainingPct)}%` : "",
     url: URLS.gemini,
     ok: weekly.remainingPct != null,
   };
@@ -595,11 +662,33 @@ function averageServices(services) {
     ? withReset.slice().sort((a, b) => a.resetAt - b.resetAt)[0]
     : bottleneck;
 
+  const with5h = ok.filter((s) => s.remaining5hPct != null && Number.isFinite(s.remaining5hPct));
+  let remaining5hPct = null;
+  let reset5hHint = null;
+  let reset5hAt = null;
+
+  if (with5h.length > 0) {
+    remaining5hPct = clampPct(
+      with5h.reduce((sum, s) => sum + Number(s.remaining5hPct), 0) / with5h.length
+    );
+    const activeCooldowns = with5h.filter((s) => s.reset5hAt != null && Number.isFinite(s.reset5hAt) && s.reset5hHint !== "满");
+    if (activeCooldowns.length > 0) {
+      const earliest5h = activeCooldowns.slice().sort((a, b) => a.reset5hAt - b.reset5hAt)[0];
+      reset5hHint = earliest5h.reset5hHint;
+      reset5hAt = earliest5h.reset5hAt;
+    } else {
+      reset5hHint = "满";
+    }
+  }
+
   return Object.assign({}, bottleneck, {
     remainingPct,
     usedPct: remainingPct == null ? null : clampPct(100 - remainingPct),
     resetHint: earliestReset.resetHint || bottleneck.resetHint || "",
     resetAt: earliestReset.resetAt ?? bottleneck.resetAt ?? null,
+    remaining5hPct,
+    reset5hHint,
+    reset5hAt,
     extra: bottleneck.extra || "",
     ok: remainingPct != null,
   });
@@ -632,6 +721,9 @@ async function fetchAveragedAccounts(files, testers, fetchOne, missingError) {
     remainingPct: s.res.remainingPct,
     resetHint: s.res.resetHint,
     resetAt: s.res.resetAt,
+    remaining5hPct: s.res.remaining5hPct,
+    reset5hHint: s.res.reset5hHint,
+    reset5hAt: s.res.reset5hAt,
     extra: s.res.extra,
   }));
   if (errors.length > 0 && errors.length < accounts.length) {
@@ -887,53 +979,97 @@ function drawBar(w, h, remainingPct, color) {
   return ctx.getImage();
 }
 
-function drawRing(size, remainingPct, stroke, color) {
+function drawConcentricRings(size, weeklyPct, pct5h, opts = {}) {
   const ctx = new DrawContext();
   ctx.size = new Size(size, size);
   ctx.opaque = false;
   ctx.respectScreenScale = true;
 
-  const line = stroke;
-  const r = (size - line) / 2;
+  const hasInner = pct5h != null && Number.isFinite(pct5h);
   const c = new Point(size / 2, size / 2);
 
-  const trackPath = new Path();
-  trackPath.addEllipse(new Rect(line / 2, line / 2, size - line, size - line));
+  // 外环 (周额度)
+  const strokeOuter = opts.stroke || (size >= 80 ? 7 : size >= 62 ? 5 : 3.5);
+  const gap = hasInner ? (size >= 80 ? 3 : size >= 62 ? 2 : 1.5) : 0;
+  const strokeInner = hasInner ? (size >= 80 ? 5 : size >= 62 ? 3.2 : 2.2) : 0;
+
+  const rOuter = (size - strokeOuter) / 2;
+  const rInner = hasInner ? (size / 2 - strokeOuter - gap - strokeInner / 2) : 0;
+
+  // 1. 绘制外环底轨
+  const trackOuter = new Path();
+  trackOuter.addEllipse(new Rect(c.x - rOuter, c.y - rOuter, rOuter * 2, rOuter * 2));
   ctx.setStrokeColor(track());
-  ctx.setLineWidth(line);
-  ctx.addPath(trackPath);
+  ctx.setLineWidth(strokeOuter);
+  ctx.addPath(trackOuter);
   ctx.strokePath();
 
-  const pct = remainingPct == null ? 0 : Math.max(0, Math.min(100, remainingPct)) / 100;
-  if (pct > 0.001) {
-    const path = new Path();
+  // 2. 绘制外环进度 (周额度)
+  const wFrac = weeklyPct == null ? 0 : Math.max(0, Math.min(100, weeklyPct)) / 100;
+  if (wFrac > 0.001) {
+    const pathOuter = new Path();
     const start = -Math.PI / 2;
-    const end = start + Math.PI * 2 * pct;
-    const steps = Math.max(20, Math.floor(90 * pct));
+    const end = start + Math.PI * 2 * wFrac;
+    const steps = Math.max(20, Math.floor(90 * wFrac));
     for (let i = 0; i <= steps; i++) {
       const a = start + ((end - start) * i) / steps;
-      const p = new Point(c.x + r * Math.cos(a), c.y + r * Math.sin(a));
-      if (i === 0) path.move(p);
-      else path.addLine(p);
+      const p = new Point(c.x + rOuter * Math.cos(a), c.y + rOuter * Math.sin(a));
+      if (i === 0) pathOuter.move(p);
+      else pathOuter.addLine(p);
     }
-    ctx.setStrokeColor(color);
-    ctx.setLineWidth(line);
-    ctx.addPath(path);
+    ctx.setStrokeColor(accentFor(weeklyPct));
+    ctx.setLineWidth(strokeOuter);
+    ctx.addPath(pathOuter);
     ctx.strokePath();
   }
 
-  const label = remainingPct == null ? "—" : `${Math.round(remainingPct)}`;
-  ctx.setTextAlignedCenter();
-  ctx.setTextColor(remainingPct == null ? faint() : ink());
-  const fontSize = size >= 80 ? 22 : size >= 62 ? 17 : 13;
-  ctx.setFont(Font.boldSystemFont(fontSize));
-  ctx.drawTextInRect(label, new Rect(0, size / 2 - fontSize / 2 - 6, size, fontSize + 2));
-  if (remainingPct != null) {
-    ctx.setFont(Font.mediumSystemFont(Math.max(8, Math.floor(fontSize * 0.55))));
-    ctx.setTextColor(faint());
-    ctx.drawTextInRect("%", new Rect(0, size / 2 + fontSize / 2 - 4, size, 14));
+  // 3. 绘制内环 (5小时额度，若无则不画保持通透)
+  if (hasInner) {
+    const trackInner = new Path();
+    trackInner.addEllipse(new Rect(c.x - rInner, c.y - rInner, rInner * 2, rInner * 2));
+    ctx.setStrokeColor(track());
+    ctx.setLineWidth(strokeInner);
+    ctx.addPath(trackInner);
+    ctx.strokePath();
+
+    const fFrac = Math.max(0, Math.min(100, pct5h)) / 100;
+    if (fFrac > 0.001) {
+      const pathInner = new Path();
+      const start = -Math.PI / 2;
+      const end = start + Math.PI * 2 * fFrac;
+      const steps = Math.max(16, Math.floor(70 * fFrac));
+      for (let i = 0; i <= steps; i++) {
+        const a = start + ((end - start) * i) / steps;
+        const p = new Point(c.x + rInner * Math.cos(a), c.y + rInner * Math.sin(a));
+        if (i === 0) pathInner.move(p);
+        else pathInner.addLine(p);
+      }
+      ctx.setStrokeColor(accentFor5h(pct5h));
+      ctx.setLineWidth(strokeInner);
+      ctx.addPath(pathInner);
+      ctx.strokePath();
+    }
   }
+
+  // 4. 中心周额度数值大字
+  const label = weeklyPct == null ? "—" : `${Math.round(weeklyPct)}`;
+  ctx.setTextAlignedCenter();
+  ctx.setTextColor(weeklyPct == null ? faint() : ink());
+  const fontSize = size >= 80 ? 20 : size >= 62 ? 15 : 11;
+  ctx.setFont(Font.boldSystemFont(fontSize));
+  ctx.drawTextInRect(label, new Rect(0, size / 2 - fontSize / 2 - (size >= 62 ? 5 : 3), size, fontSize + 2));
+  if (weeklyPct != null) {
+    const pctSize = Math.max(7, Math.floor(fontSize * 0.52));
+    ctx.setFont(Font.mediumSystemFont(pctSize));
+    ctx.setTextColor(faint());
+    ctx.drawTextInRect("%", new Rect(0, size / 2 + fontSize / 2 - (size >= 62 ? 4 : 2), size, 12));
+  }
+
   return ctx.getImage();
+}
+
+function drawRing(size, remainingPct, stroke, color) {
+  return drawConcentricRings(size, remainingPct, null, { stroke });
 }
 
 // ---------- UI ----------
@@ -968,10 +1104,10 @@ function addRule(parent) {
 
 function rowMeta(svc) {
   const bits = [];
-  if (svc.windowLabel) bits.push(svc.windowLabel);
-  if (svc.resetHint) bits.push(svc.resetHint);
-  if (svc.extra) bits.push(svc.extra);
-  return bits.join("  ·  ");
+  if (svc.resetHint) bits.push(`周:${shortenHint(svc.resetHint)}`);
+  if (svc.reset5hHint) bits.push(`5h:${shortenHint(svc.reset5hHint)}`);
+  else if (svc.remaining5hPct == null) bits.push("单层");
+  return bits.join(" · ");
 }
 
 function addServiceColumn(parent, svc, opts = {}) {
@@ -997,7 +1133,7 @@ function addServiceColumn(parent, svc, opts = {}) {
   name.minimumScaleFactor = 0.8;
   sp(title);
 
-  sp(col, 8);
+  sp(col, 6);
 
   const ringRow = col.addStack();
   ringRow.layoutHorizontally();
@@ -1005,22 +1141,47 @@ function addServiceColumn(parent, svc, opts = {}) {
   sp(ringRow);
   addFixedImage(
     ringRow,
-    drawRing(ringSize, svc.remainingPct, stroke, accentFor(svc.remainingPct)),
+    drawConcentricRings(ringSize, svc.remainingPct, svc.remaining5hPct, { stroke }),
     ringSize,
     ringSize
   );
   sp(ringRow);
 
-  sp(col, 6);
-  const hint = svc.resetHint || svc.windowLabel || "";
-  const hintRow = col.addStack();
-  hintRow.layoutHorizontally();
-  hintRow.centerAlignContent();
-  hintRow.url = serviceTapURL(svc.id);
-  sp(hintRow);
-  const sub = t(hintRow, hint, { size: 10, color: UI.muted, lines: 1 });
-  sub.minimumScaleFactor = 0.75;
-  sp(hintRow);
+  sp(col, 5);
+
+  // Line 1: 周重置倒计时
+  const line1Text = svc.resetHint ? `周 · ${shortenHint(svc.resetHint)}` : (svc.windowLabel || "");
+  const row1 = col.addStack();
+  row1.layoutHorizontally();
+  row1.centerAlignContent();
+  row1.url = serviceTapURL(svc.id);
+  sp(row1);
+  const sub1 = t(row1, line1Text, { size: 9.5, color: UI.muted, lines: 1 });
+  sub1.minimumScaleFactor = 0.75;
+  sp(row1);
+
+  // Line 2: 5小时限额状态 (或Grok单层说明)
+  let line2Text = "";
+  let line2Color = UI.muted;
+  if (svc.remaining5hPct != null) {
+    const pctStr = `${Math.round(svc.remaining5hPct)}%`;
+    const cd = svc.reset5hHint && svc.reset5hHint !== "满" ? ` · ${shortenHint(svc.reset5hHint)}` : "";
+    line2Text = `5h · ${pctStr}${cd}`;
+    if (svc.remaining5hPct <= 22) line2Color = accentFor5h(svc.remaining5hPct);
+  } else {
+    line2Text = "单层周额度";
+    line2Color = UI.faint;
+  }
+
+  sp(col, 2);
+  const row2 = col.addStack();
+  row2.layoutHorizontally();
+  row2.centerAlignContent();
+  row2.url = serviceTapURL(svc.id);
+  sp(row2);
+  const sub2 = t(row2, line2Text, { size: 9, color: line2Color, lines: 1 });
+  sub2.minimumScaleFactor = 0.75;
+  sp(row2);
 
   return col;
 }
@@ -1050,9 +1211,9 @@ function buildColumns(widget, data, opts) {
 function buildMedium(data) {
   const w = new ListWidget();
   applySystemChrome(w);
-  w.setPadding(12, 10, 10, 10);
+  w.setPadding(12, 10, 8, 10);
   sp(w);
-  buildColumns(w, data, { logoSize: 16, nameSize: 11, ringSize: 70, stroke: 6, colWidth: 104 });
+  buildColumns(w, data, { logoSize: 16, nameSize: 11, ringSize: 66, stroke: 5, colWidth: 104 });
   sp(w);
   return w;
 }
@@ -1104,12 +1265,17 @@ async function presentPreviewMenu(data, cfg) {
   const a = new Alert();
   a.title = "AI Quota";
   const lines = ordered(data).map((s) => {
-    const left = s.remainingPct == null ? "—" : `${Math.round(s.remainingPct)}% 剩余`;
+    const left = s.remainingPct == null ? "—" : `周 ${Math.round(s.remainingPct)}%`;
+    const h5 = s.remaining5hPct != null ? ` · 5h ${Math.round(s.remaining5hPct)}%` : "";
     const countInfo = s.accountCount && s.accountCount > 1 ? ` (${s.accountCount}账号均值)` : "";
-    let line = `${s.name}${countInfo}  ${left}  ${rowMeta(s)}`;
+    let line = `${s.name}${countInfo}  ${left}${h5}  ${rowMeta(s)}`;
     if (s.accountDetails && s.accountDetails.length > 1) {
       const details = s.accountDetails
-        .map((d) => `  · ${d.name}: ${Math.round(d.remainingPct)}%${d.resetHint ? ` (${d.resetHint})` : ""}`)
+        .map((d) => {
+          const w = `周:${Math.round(d.remainingPct)}%${d.resetHint ? `(${shortenHint(d.resetHint)})` : ""}`;
+          const f = d.remaining5hPct != null ? ` 5h:${Math.round(d.remaining5hPct)}%${d.reset5hHint ? `(${shortenHint(d.reset5hHint)})` : ""}` : "";
+          return `  · ${d.name}: ${w}${f}`;
+        })
         .join("\n");
       line += `\n${details}`;
     }
