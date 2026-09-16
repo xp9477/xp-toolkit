@@ -10,6 +10,7 @@ function createMockService(options?: {
   workspacesJson?: any[];
   agents?: any[];
   timelineMap?: Record<string, any>;
+  analyzeTask?: (input: any) => Promise<any>;
 }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wt-test-"));
   const stateFile = path.join(tmpDir, "state.json");
@@ -25,7 +26,30 @@ function createMockService(options?: {
   process.env.PASEO_HOME = tmpDir;
 
   const store = new WorkspaceTitleStore(stateFile);
-  const service = new WorkspaceTitleService({ enableLlmFallback: false }, store);
+  const service = new WorkspaceTitleService(
+    {
+      enableLlmFallback: false,
+      analyzeTask:
+        options?.analyzeTask ||
+        (async (input) => {
+          const userText = input.firstTurn?.userInstruction || input.agentTitle || "";
+          if (userText.includes("修复") || userText.includes("解决")) {
+            const topic = userText.replace(/^(?:修复|解决)\s*/, "").trim();
+            return { type: "修复", topic };
+          }
+          if (userText.includes("优化")) {
+            const topic = userText.replace(/^优化\s*/, "").trim();
+            return { type: "优化", topic };
+          }
+          if (userText.includes("新系统架构") || userText.includes("开发") || userText.includes("实现")) {
+            let topic = userText.replace(/^(?:开发|实现)\s*/, "").trim();
+            return { type: "功能", topic };
+          }
+          return { type: "功能", topic: userText.slice(0, 15) || "测试任务" };
+        }),
+    },
+    store
+  );
   (service as any).running = true;
 
   const setTitleCalls: Array<{ id: string; title: string }> = [];
@@ -38,7 +62,12 @@ function createMockService(options?: {
           setTitleCalls.push({ id, title });
           return { title };
         },
-        refresh: async () => null,
+        refresh: async () => {
+          const ws = options?.workspacesJson?.find((w) => w.workspaceId === id);
+          return ws
+            ? { id, title: ws.title || null, name: ws.name || "test", projectDisplayName: "test" }
+            : { id, title: null, name: "test", projectDisplayName: "test" };
+        },
       }),
       list: async () => ({ entries: [] }),
     },
@@ -51,7 +80,29 @@ function createMockService(options?: {
 
   const mockDaemonClient = {
     fetchAgentTimeline: async (agentId: string) => {
-      return options?.timelineMap?.[agentId] || { entries: [] };
+      if (options?.timelineMap && options.timelineMap[agentId]) {
+        return options.timelineMap[agentId];
+      }
+      const agent = (options?.agents || []).find((a) => a.id === agentId);
+      if (agent) {
+        return {
+          entries: [
+            {
+              item: {
+                type: "user_message",
+                text: agent.title || "实现测试任务",
+              },
+            },
+            {
+              item: {
+                type: "assistant_message",
+                text: "好的，已完成首轮交互与执行。",
+              },
+            },
+          ],
+        };
+      }
+      return { entries: [] };
     },
     close: async () => {},
   };
@@ -65,7 +116,7 @@ function createMockService(options?: {
     } catch {}
   };
 
-  return { service, store, setTitleCalls, cleanup, tmpDir };
+  return { service, store, setTitleCalls, cleanup, tmpDir, mockPaseo };
 }
 
 test("Idempotency: already formatted title is never renamed", async () => {
@@ -136,6 +187,165 @@ test("Missing createdAt: retains original title and does not rename", async () =
   }
 });
 
+test("Premature naming prevention: does not rename when first turn is not finished", async () => {
+  // Case A: Completely empty timeline
+  const { service: serviceA, setTitleCalls: callsA, cleanup: cleanupA } = createMockService({
+    workspacesJson: [
+      {
+        workspaceId: "wks_empty_timeline",
+        createdAt: "2026-09-13T04:00:00.000Z",
+      },
+    ],
+    agents: [
+      {
+        id: "ag_empty",
+        workspaceId: "wks_empty_timeline",
+        title: "新创建的代理",
+        createdAt: "2026-09-13T04:00:01.000Z",
+      },
+    ],
+    timelineMap: {
+      ag_empty: { entries: [] },
+    },
+  });
+
+  try {
+    const wsA = {
+      id: "wks_empty_timeline",
+      title: null,
+      name: "test",
+    };
+    const resA = await serviceA.processWorkspace(wsA);
+    assert.equal(resA, false);
+    assert.equal(callsA.length, 0);
+  } finally {
+    cleanupA();
+  }
+
+  // Case B: User prompt sent, but assistant has not replied or executed tools yet
+  const { service: serviceB, setTitleCalls: callsB, cleanup: cleanupB } = createMockService({
+    workspacesJson: [
+      {
+        workspaceId: "wks_in_progress",
+        createdAt: "2026-09-13T04:00:00.000Z",
+      },
+    ],
+    agents: [
+      {
+        id: "ag_in_progress",
+        workspaceId: "wks_in_progress",
+        title: "代理正在执行中",
+        createdAt: "2026-09-13T04:00:01.000Z",
+      },
+    ],
+    timelineMap: {
+      ag_in_progress: {
+        entries: [
+          { item: { type: "user_message", text: "请帮我重构一下工作区命名" } },
+        ],
+      },
+    },
+  });
+
+  try {
+    const wsB = {
+      id: "wks_in_progress",
+      title: null,
+      name: "test",
+    };
+    const resB = await serviceB.processWorkspace(wsB);
+    assert.equal(resB, false);
+    assert.equal(callsB.length, 0);
+  } finally {
+    cleanupB();
+  }
+});
+
+test("agent.turn_ended hook: renames workspace after root agent first turn concludes", async () => {
+  const { service, setTitleCalls, cleanup, mockPaseo } = createMockService({
+    workspacesJson: [
+      {
+        workspaceId: "wks_turn_ended_test",
+        createdAt: "2026-09-13T04:00:00.000Z",
+      },
+    ],
+    agents: [
+      {
+        id: "ag_root_turn",
+        workspaceId: "wks_turn_ended_test",
+        title: "开发新系统架构",
+        createdAt: "2026-09-13T04:00:01.000Z",
+      },
+    ],
+  });
+
+  try {
+    const event = {
+      agent: {
+        id: "ag_root_turn",
+        workspaceId: "wks_turn_ended_test",
+        parentAgentId: null,
+        title: "开发新系统架构",
+      },
+      turnId: "turn-0",
+      outcome: { kind: "completed" },
+      timeline: [
+        { type: "user_message", text: "开发新系统架构" },
+        { type: "tool_call", name: "shell", detail: { command: "mkdir src" } },
+        { type: "assistant_message", text: "已创建 src 目录并完成系统架构设计。" },
+      ],
+    };
+
+    const renamed = await service.processWorkspaceOnTurnEnded(event, mockPaseo);
+    assert.equal(renamed, true);
+    assert.equal(setTitleCalls.length, 1);
+    assert.equal(setTitleCalls[0].title, "0913 | 功能 | 新系统架构");
+  } finally {
+    cleanup();
+  }
+});
+
+test("Sub-agent turn_ended: ignored and does not rename workspace", async () => {
+  const { service, setTitleCalls, cleanup, mockPaseo } = createMockService({
+    workspacesJson: [
+      {
+        workspaceId: "wks_sub_ended_test",
+        createdAt: "2026-09-13T04:00:00.000Z",
+      },
+    ],
+    agents: [
+      {
+        id: "ag_root",
+        workspaceId: "wks_sub_ended_test",
+        title: "主任务：重构代码",
+      },
+    ],
+  });
+
+  try {
+    const subEvent = {
+      agent: {
+        id: "ag_sub",
+        workspaceId: "wks_sub_ended_test",
+        parentAgentId: "ag_root",
+        title: "子代理任务",
+      },
+      turnId: "turn-0",
+      outcome: { kind: "completed" },
+      timeline: [
+        { type: "user_message", text: "子代理执行搜索" },
+        { type: "assistant_message", text: "搜索完毕" },
+      ],
+    };
+
+    const renamed = await service.processWorkspaceOnTurnEnded(subEvent, mockPaseo);
+    assert.equal(renamed, false);
+    assert.equal(setTitleCalls.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
 test("Manual rename protection: user edit after plugin naming is preserved", async () => {
   const { service, store, setTitleCalls, cleanup } = createMockService({
     workspacesJson: [
@@ -152,6 +362,7 @@ test("Manual rename protection: user edit after plugin naming is preserved", asy
         createdAt: "2026-09-13T04:01:00.000Z",
       },
     ],
+    analyzeTask: async () => ({ type: "功能", topic: "自动命名功能" }),
   });
 
   try {
@@ -213,6 +424,12 @@ test("Sub-agent protection: sub-agent task does not override root agent task", a
         createdAt: "2026-09-13T04:06:00.000Z",
       },
     ],
+    analyzeTask: async (input) => {
+      if (input.firstTurn?.userInstruction?.includes("新系统架构") || input.agentTitle?.includes("新系统架构")) {
+        return { type: "功能", topic: "新系统架构" };
+      }
+      return { type: "功能", topic: "子代理任务" };
+    },
   });
 
   try {

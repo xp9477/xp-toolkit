@@ -16,6 +16,13 @@ export interface ClassificationResult {
   topic: string;
 }
 
+export interface FirstTurnContext {
+  userInstruction: string;
+  assistantReply: string;
+  toolSummaries?: string[];
+  fullContextText: string;
+}
+
 export type WorkspaceStateStatus =
   | "pending"
   | "named"
@@ -38,4 +45,15 @@ export interface WorkspaceTitlePluginConfig {
   scanIntervalMs?: number;
   timezone?: string;
   enableLlmFallback?: boolean;
+}
+
+export interface WorkspaceTitleServiceOptions extends WorkspaceTitlePluginConfig {
+  analyzeTask?: (input: {
+    firstTurn?: FirstTurnContext | null;
+    timeline?: readonly any[] | null;
+    agentTitle?: string | null;
+    initialPrompt?: string | null;
+    workspaceName?: string | null;
+    projectName?: string | null;
+  }) => Promise<ClassificationResult | null>;
 }

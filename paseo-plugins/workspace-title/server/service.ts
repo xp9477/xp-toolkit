@@ -2,10 +2,20 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { ChildProcess } from "node:child_process";
-import { formatMMDD, isFormattedTitle, parseFormattedTitle, buildTitle, cleanTopic } from "../shared/formatter";
-import { analyzeWorkspaceTask } from "./analyzer";
+import {
+  formatMMDD,
+  isFormattedTitle,
+  parseFormattedTitle,
+  buildTitle,
+} from "../shared/formatter";
+import { analyzeWorkspaceTask, extractFirstTurnContext } from "./analyzer";
 import { WorkspaceTitleStore } from "./store";
-import type { WorkspaceTitlePluginConfig } from "../shared/types";
+import type {
+  ClassificationResult,
+  FirstTurnContext,
+  WorkspaceTitlePluginConfig,
+  WorkspaceTitleServiceOptions,
+} from "../shared/types";
 
 export class WorkspaceTitleService {
   private store: WorkspaceTitleStore;
@@ -19,8 +29,19 @@ export class WorkspaceTitleService {
   private daemonClient: any = null;
   private paseo: any = null;
   private connectPromise: Promise<boolean> | null = null;
+  private customAnalyzer?: (input: {
+    firstTurn?: FirstTurnContext | null;
+    timeline?: readonly any[] | null;
+    agentTitle?: string | null;
+    initialPrompt?: string | null;
+    workspaceName?: string | null;
+    projectName?: string | null;
+  }) => Promise<ClassificationResult | null>;
 
-  constructor(options?: WorkspaceTitlePluginConfig, store?: WorkspaceTitleStore) {
+  constructor(
+    options?: WorkspaceTitleServiceOptions,
+    store?: WorkspaceTitleStore
+  ) {
     this.config = {
       maxRetries: options?.maxRetries ?? 3,
       scanIntervalMs: options?.scanIntervalMs ?? 5000,
@@ -28,6 +49,7 @@ export class WorkspaceTitleService {
       enableLlmFallback: options?.enableLlmFallback ?? true,
     };
     this.store = store || new WorkspaceTitleStore();
+    this.customAnalyzer = options?.analyzeTask;
   }
 
   public getStore(): WorkspaceTitleStore {
@@ -102,7 +124,10 @@ export class WorkspaceTitleService {
    */
   public async ensureConnection(): Promise<boolean> {
     if (!this.running) return false;
-    if (this.daemonClient && this.daemonClient.getConnectionState?.()?.status === "connected") {
+    if (
+      this.daemonClient &&
+      this.daemonClient.getConnectionState?.()?.status === "connected"
+    ) {
       return true;
     }
     if (this.connectPromise) {
@@ -127,7 +152,9 @@ export class WorkspaceTitleService {
     }
     try {
       await this.initDaemonConnection();
-      return this.daemonClient?.getConnectionState?.()?.status === "connected";
+      return (
+        this.daemonClient?.getConnectionState?.()?.status === "connected"
+      );
     } catch (err) {
       console.error("[workspace-title] Daemon connection failed:", err);
       return false;
@@ -149,19 +176,22 @@ export class WorkspaceTitleService {
     this.daemonClient = await connectToDaemon();
     this.paseo = createPaseoApi(this.daemonClient);
 
-    // Subscribe to workspace updates
+    // Subscribe to workspace updates to detect user manual title edits or changes
     this.unsubscribeWorkspaceUpdates = this.paseo.workspaces.subscribe(
       (update: any) => {
         if (!this.running) return;
         if (update && update.kind === "upsert" && update.workspace) {
           this.processWorkspace(update.workspace).catch((err) => {
-            console.error(`[workspace-title] Error processing workspace update ${update.workspace.id}:`, err);
+            console.error(
+              `[workspace-title] Error processing workspace update ${update.workspace.id}:`,
+              err
+            );
           });
         }
       }
     );
 
-    // Subscribe to agent updates
+    // Subscribe to agent updates as a fallback trigger
     this.unsubscribeAgentUpdates = this.paseo.agents.subscribe(
       (update: any) => {
         if (!this.running) return;
@@ -172,7 +202,10 @@ export class WorkspaceTitleService {
           }
           if (agent.workspaceId) {
             this.processWorkspaceById(agent.workspaceId).catch((err) => {
-              console.error(`[workspace-title] Error processing workspace from agent update ${agent.workspaceId}:`, err);
+              console.error(
+                `[workspace-title] Error processing workspace from agent update ${agent.workspaceId}:`,
+                err
+              );
             });
           }
         }
@@ -185,44 +218,96 @@ export class WorkspaceTitleService {
   }
 
   /**
-   * Sweep all workspaces.
+   * Primary entrypoint triggered when root agent's turn has ended.
+   */
+  public async processWorkspaceOnTurnEnded(
+    event: any,
+    paseoOverride?: any
+  ): Promise<boolean> {
+    if (!this.running) return false;
+    const agent = event?.agent;
+    if (!agent) return false;
+
+    // Sub-agents are ignored: only root agents define the workspace task
+    if (agent.parentAgentId || agent.labels?.["paseo.parent-agent-id"]) {
+      return false;
+    }
+
+    const workspaceId = agent.workspaceId;
+    if (!workspaceId) return false;
+
+    return await this.processWorkspaceById(
+      workspaceId,
+      paseoOverride,
+      event.timeline,
+      agent
+    );
+  }
+
+  /**
+   * Sweep all workspaces periodically.
    */
   public async checkAllWorkspaces(): Promise<void> {
     if (!this.running) return;
     const isConnected = await this.ensureConnection();
     if (!isConnected || !this.paseo) return;
 
-    const res = await this.paseo.workspaces.list({ page: { limit: 200 } }).catch((err: any) => {
-      console.error("[workspace-title] Failed to list workspaces during sweep:", err.message);
-      return null;
-    });
+    const res = await this.paseo.workspaces
+      .list({ page: { limit: 200 } })
+      .catch((err: any) => {
+        console.error(
+          "[workspace-title] Failed to list workspaces during sweep:",
+          err.message
+        );
+        return null;
+      });
     if (!res || !Array.isArray(res.entries)) return;
 
     for (const workspace of res.entries) {
       if (!this.running) break;
       await this.processWorkspace(workspace).catch((err) => {
-        console.error(`[workspace-title] Error in sweep for ${workspace.id}:`, err);
+        console.error(
+          `[workspace-title] Error in sweep for ${workspace.id}:`,
+          err
+        );
       });
     }
   }
 
-  public async processWorkspaceById(workspaceId: string, paseoOverride?: any): Promise<boolean> {
+  public async processWorkspaceById(
+    workspaceId: string,
+    paseoOverride?: any,
+    timelineOverride?: readonly any[],
+    agentOverride?: any
+  ): Promise<boolean> {
     if (!this.running) return false;
-    const paseoApi = paseoOverride || (await this.ensureConnection() ? this.paseo : null);
+    const paseoApi =
+      paseoOverride || ((await this.ensureConnection()) ? this.paseo : null);
     if (!paseoApi) return false;
 
     const handle = paseoApi.workspaces.ref(workspaceId);
     const workspace = await handle.refresh();
     if (workspace) {
-      return await this.processWorkspace(workspace, paseoApi);
+      return await this.processWorkspace(
+        workspace,
+        paseoApi,
+        timelineOverride,
+        agentOverride
+      );
     }
     return false;
   }
 
   /**
-   * Process a single workspace: validation, manual protection, task analysis, renaming.
+   * Process a single workspace: validation, manual protection, first-turn context extraction,
+   * LLM semantic classification, and standardized renaming.
    */
-  public async processWorkspace(workspace: any, paseoOverride?: any): Promise<boolean> {
+  public async processWorkspace(
+    workspace: any,
+    paseoOverride?: any,
+    timelineOverride?: readonly any[],
+    agentOverride?: any
+  ): Promise<boolean> {
     if (!this.running) return false;
     const workspaceId = workspace.id || workspace.workspaceId;
     if (!workspaceId) return false;
@@ -233,13 +318,23 @@ export class WorkspaceTitleService {
 
     this.processingLocks.add(workspaceId);
     try {
-      return await this.doProcessWorkspace(workspace, paseoOverride);
+      return await this.doProcessWorkspace(
+        workspace,
+        paseoOverride,
+        timelineOverride,
+        agentOverride
+      );
     } finally {
       this.processingLocks.delete(workspaceId);
     }
   }
 
-  private async doProcessWorkspace(workspace: any, paseoOverride?: any): Promise<boolean> {
+  private async doProcessWorkspace(
+    workspace: any,
+    paseoOverride?: any,
+    timelineOverride?: readonly any[],
+    agentOverride?: any
+  ): Promise<boolean> {
     if (!this.running) return false;
     const workspaceId = workspace.id || workspace.workspaceId;
     const currentTitle = workspace.title ?? null;
@@ -255,26 +350,14 @@ export class WorkspaceTitleService {
       return false;
     }
 
-    // 2. Resolve root/primary agent for the workspace first
-    const rootAgent = await this.resolveRootAgent(workspaceId, paseoApi);
-
-    // 3. Check if already formatted (Idempotency)
+    // 2. Check if already formatted title (Idempotency)
     const parsed = parseFormattedTitle(currentTitle);
     if (parsed) {
-      const cleanT = cleanTopic(parsed.topic, workspace.projectDisplayName || workspace.name);
-      const hasChineseContext =
-        (rootAgent && /[\u4e00-\u9fa5]/.test(rootAgent.title || "")) ||
-        /[\u4e00-\u9fa5]/.test(workspace.name || "");
-      const isEnglishTopic = !/[\u4e00-\u9fa5]/.test(cleanT);
-
-      // Only re-process if user context is Chinese but existing topic is English
-      if (!(hasChineseContext && isEnglishTopic)) {
-        this.store.recordNamed(workspaceId, currentTitle!);
-        return false;
-      }
+      this.store.recordNamed(workspaceId, currentTitle!);
+      return false;
     }
 
-    // 4. Check user manual rename protection
+    // 3. Check user manual rename protection
     const state = this.store.get(workspaceId);
     if (state?.status === "manual") {
       return false;
@@ -293,19 +376,35 @@ export class WorkspaceTitleService {
       return false;
     }
 
-    // 5. Check retry limit
+    // 4. Check retry limit
     if (!this.store.canAttempt(workspaceId, this.config.maxRetries)) {
       return false;
     }
+
+    // 5. Resolve root agent for the workspace
+    const rootAgent =
+      agentOverride && !agentOverride.parentAgentId
+        ? agentOverride
+        : await this.resolveRootAgent(workspaceId, paseoApi);
 
     if (!rootAgent) {
       return false;
     }
 
-    // Record attempt
-    this.store.recordAttempt(workspaceId, currentTitle || undefined);
+    // 6. Extract first turn context from timeline
+    let timeline: readonly any[] | null | undefined = timelineOverride;
+    if (!timeline || !Array.isArray(timeline) || timeline.length === 0) {
+      timeline = await this.fetchAgentTimelineItems(rootAgent.id);
+    }
 
-    // 6. Fetch actual createdAt of workspace
+    const firstTurn = extractFirstTurnContext(timeline);
+    if (!firstTurn) {
+      // First turn has not concluded yet or has no substantive content!
+      // Do not name prematurely; wait for the first turn to finish.
+      return false;
+    }
+
+    // 7. Fetch actual createdAt of workspace
     const createdAt = await this.resolveWorkspaceCreatedAt(workspaceId);
     if (!createdAt) {
       console.warn(
@@ -315,18 +414,19 @@ export class WorkspaceTitleService {
       return false;
     }
 
-    let agentTitle: string | null = rootAgent.title || null;
-    let initialPrompt: string | null = await this.fetchAgentFirstPrompt(rootAgent.id);
-
     if (!this.running) return false;
 
-    // 7. Analyze task to get type and topic
-    const classification = await analyzeWorkspaceTask({
-      agentTitle,
-      initialPrompt,
+    // Record attempt now that substantive first-turn content and createdAt are confirmed
+    this.store.recordAttempt(workspaceId, currentTitle || undefined);
+
+    // 8. Analyze task via LLM (gemini-3.5-flash-lite)
+    const analyzeFn = this.customAnalyzer || analyzeWorkspaceTask;
+    const classification = await analyzeFn({
+      firstTurn,
+      timeline,
+      agentTitle: rootAgent.title || null,
       workspaceName: workspace.name,
       projectName: workspace.projectDisplayName || workspace.name,
-      enableLlmFallback: this.config.enableLlmFallback,
     });
 
     if (!this.running) return false;
@@ -339,7 +439,7 @@ export class WorkspaceTitleService {
       return false;
     }
 
-    // 8. Build target standardized title
+    // 9. Build target standardized title: MMDD | 类型 | 主题
     const newTitle = buildTitle(
       createdAt,
       classification.type,
@@ -414,7 +514,10 @@ export class WorkspaceTitleService {
     return null;
   }
 
-  public async resolveRootAgent(workspaceId: string, paseoOverride?: any): Promise<any | null> {
+  public async resolveRootAgent(
+    workspaceId: string,
+    paseoOverride?: any
+  ): Promise<any | null> {
     const paseoApi = paseoOverride || this.paseo;
     if (!paseoApi) return null;
     try {
@@ -447,29 +550,21 @@ export class WorkspaceTitleService {
     }
   }
 
-  public async fetchAgentFirstPrompt(agentId: string): Promise<string | null> {
+  public async fetchAgentTimelineItems(
+    agentId: string
+  ): Promise<any[] | null> {
     if (!this.daemonClient) {
       await this.ensureConnection();
     }
     if (!this.daemonClient) return null;
     try {
       const timeline = await this.daemonClient.fetchAgentTimeline(agentId, {
-        page: { limit: 20 },
+        page: { limit: 50 },
       });
       if (!timeline || !Array.isArray(timeline.entries)) return null;
-
-      for (const entry of timeline.entries) {
-        if (
-          entry &&
-          entry.item &&
-          (entry.item.type === "user_message" || entry.item.type === "prompt")
-        ) {
-          if (typeof entry.item.text === "string" && entry.item.text.trim()) {
-            return entry.item.text.trim();
-          }
-        }
-      }
-    } catch {}
-    return null;
+      return timeline.entries.map((e: any) => e.item || e);
+    } catch {
+      return null;
+    }
   }
 }

@@ -1,5 +1,8 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { getWorkspaceTitleStatusRpc, recheckWorkspaceTitleRpc } from "./shared/contracts";
+import {
+  getWorkspaceTitleStatusRpc,
+  recheckWorkspaceTitleRpc,
+} from "./shared/contracts";
 import { isFormattedTitle } from "./shared/formatter";
 import { WorkspaceTitleService } from "./server/service";
 
@@ -15,36 +18,7 @@ export default function contribute(server: PluginServerContext) {
 
   // Register native Paseo 0.8 in-process lifecycle hooks (IPC, zero websocket drop risk)
   if (typeof server.on === "function") {
-    server.on("workspace.created", (event, { paseo }) => {
-      if (serviceInstance && event?.workspace?.id) {
-        serviceInstance
-          .processWorkspaceById(event.workspace.id, paseo)
-          .catch((err) => {
-            console.error(
-              `[workspace-title] Hook error on workspace.created (${event.workspace.id}):`,
-              err
-            );
-          });
-      }
-    });
-
-    server.on("agent.created", (event, { paseo }) => {
-      if (
-        serviceInstance &&
-        event?.agent?.workspaceId &&
-        !event.agent.parentAgentId
-      ) {
-        serviceInstance
-          .processWorkspaceById(event.agent.workspaceId, paseo)
-          .catch((err) => {
-            console.error(
-              `[workspace-title] Hook error on agent.created (${event.agent.workspaceId}):`,
-              err
-            );
-          });
-      }
-    });
-
+    // Only trigger when root agent's turn has ended and full first-turn context is available
     server.on("agent.turn_ended", (event, { paseo }) => {
       if (
         serviceInstance &&
@@ -52,7 +26,7 @@ export default function contribute(server: PluginServerContext) {
         !event.agent.parentAgentId
       ) {
         serviceInstance
-          .processWorkspaceById(event.agent.workspaceId, paseo)
+          .processWorkspaceOnTurnEnded(event, paseo)
           .catch((err) => {
             console.error(
               `[workspace-title] Hook error on agent.turn_ended (${event.agent.workspaceId}):`,
