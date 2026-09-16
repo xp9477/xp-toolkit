@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { ChildProcess } from "node:child_process";
-import { formatMMDD, isFormattedTitle, parseFormattedTitle, buildTitle } from "../shared/formatter";
+import { formatMMDD, isFormattedTitle, parseFormattedTitle, buildTitle, cleanTopic } from "../shared/formatter";
 import { analyzeWorkspaceTask } from "./analyzer";
 import { WorkspaceTitleStore } from "./store";
 import type { WorkspaceTitlePluginConfig } from "../shared/types";
@@ -18,6 +18,7 @@ export class WorkspaceTitleService {
   private unsubscribeAgentUpdates: (() => void) | null = null;
   private daemonClient: any = null;
   private paseo: any = null;
+  private connectPromise: Promise<boolean> | null = null;
 
   constructor(options?: WorkspaceTitlePluginConfig, store?: WorkspaceTitleStore) {
     this.config = {
@@ -33,6 +34,10 @@ export class WorkspaceTitleService {
     return this.store;
   }
 
+  public getPaseo(): any {
+    return this.paseo;
+  }
+
   /**
    * Start the background service: connects to daemon, sets up subscriptions and polling.
    */
@@ -41,34 +46,15 @@ export class WorkspaceTitleService {
     this.running = true;
     console.log("[workspace-title] Service starting...");
 
-    try {
-      await this.initDaemonConnection();
-      console.log("[workspace-title] Daemon connection established.");
+    await this.ensureConnection();
 
-      // Run initial check on all workspaces
-      await this.checkAllWorkspaces().catch((err) => {
-        console.error("[workspace-title] Initial scan error:", err);
+    // Start periodic background sweep timer
+    this.timer = setInterval(() => {
+      if (!this.running) return;
+      this.checkAllWorkspaces().catch((err) => {
+        console.error("[workspace-title] Background sweep error:", err);
       });
-
-      // Start periodic background sweep timer
-      this.timer = setInterval(() => {
-        if (!this.running) return;
-        this.checkAllWorkspaces().catch((err) => {
-          console.error("[workspace-title] Background sweep error:", err);
-        });
-      }, this.config.scanIntervalMs);
-    } catch (err) {
-      console.error("[workspace-title] Failed to start daemon connection:", err);
-      // Retry connection on timer
-      this.timer = setInterval(() => {
-        if (!this.running) return;
-        if (!this.daemonClient) {
-          this.initDaemonConnection().catch(() => {});
-        } else {
-          this.checkAllWorkspaces().catch(() => {});
-        }
-      }, this.config.scanIntervalMs);
-    }
+    }, this.config.scanIntervalMs);
   }
 
   /**
@@ -86,15 +72,7 @@ export class WorkspaceTitleService {
       } catch {}
     }
     this.activeProcesses.clear();
-
-    if (this.unsubscribeWorkspaceUpdates) {
-      this.unsubscribeWorkspaceUpdates();
-      this.unsubscribeWorkspaceUpdates = null;
-    }
-    if (this.unsubscribeAgentUpdates) {
-      this.unsubscribeAgentUpdates();
-      this.unsubscribeAgentUpdates = null;
-    }
+    this.teardownSubscriptions();
     if (this.daemonClient) {
       await this.daemonClient.close().catch(() => {});
       this.daemonClient = null;
@@ -102,6 +80,58 @@ export class WorkspaceTitleService {
     }
     this.store.destroy();
     console.log("[workspace-title] Service stopped cleanly.");
+  }
+
+  private teardownSubscriptions(): void {
+    if (this.unsubscribeWorkspaceUpdates) {
+      try {
+        this.unsubscribeWorkspaceUpdates();
+      } catch {}
+      this.unsubscribeWorkspaceUpdates = null;
+    }
+    if (this.unsubscribeAgentUpdates) {
+      try {
+        this.unsubscribeAgentUpdates();
+      } catch {}
+      this.unsubscribeAgentUpdates = null;
+    }
+  }
+
+  /**
+   * Ensure active connection to daemon, reconnecting if disconnected with single-flight mutex.
+   */
+  public async ensureConnection(): Promise<boolean> {
+    if (!this.running) return false;
+    if (this.daemonClient && this.daemonClient.getConnectionState?.()?.status === "connected") {
+      return true;
+    }
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
+
+    this.connectPromise = this.doConnect().finally(() => {
+      this.connectPromise = null;
+    });
+    return this.connectPromise;
+  }
+
+  private async doConnect(): Promise<boolean> {
+    if (!this.running) return false;
+    this.teardownSubscriptions();
+    if (this.daemonClient) {
+      try {
+        await this.daemonClient.close();
+      } catch {}
+      this.daemonClient = null;
+      this.paseo = null;
+    }
+    try {
+      await this.initDaemonConnection();
+      return this.daemonClient?.getConnectionState?.()?.status === "connected";
+    } catch (err) {
+      console.error("[workspace-title] Daemon connection failed:", err);
+      return false;
+    }
   }
 
   /**
@@ -131,13 +161,12 @@ export class WorkspaceTitleService {
       }
     );
 
-    // Subscribe to agent updates (to catch when a primary agent starts or updates its title)
+    // Subscribe to agent updates
     this.unsubscribeAgentUpdates = this.paseo.agents.subscribe(
       (update: any) => {
         if (!this.running) return;
         if (update && update.kind === "upsert" && update.agent) {
           const agent = update.agent;
-          // Ignore sub-agents
           if (agent.parentAgentId || agent.labels?.["paseo.parent-agent-id"]) {
             return;
           }
@@ -159,8 +188,14 @@ export class WorkspaceTitleService {
    * Sweep all workspaces.
    */
   public async checkAllWorkspaces(): Promise<void> {
-    if (!this.running || !this.paseo) return;
-    const res = await this.paseo.workspaces.list({ page: { limit: 200 } });
+    if (!this.running) return;
+    const isConnected = await this.ensureConnection();
+    if (!isConnected || !this.paseo) return;
+
+    const res = await this.paseo.workspaces.list({ page: { limit: 200 } }).catch((err: any) => {
+      console.error("[workspace-title] Failed to list workspaces during sweep:", err.message);
+      return null;
+    });
     if (!res || !Array.isArray(res.entries)) return;
 
     for (const workspace of res.entries) {
@@ -171,40 +206,44 @@ export class WorkspaceTitleService {
     }
   }
 
-  public async processWorkspaceById(workspaceId: string): Promise<void> {
-    if (!this.running || !this.paseo) return;
-    const handle = this.paseo.workspaces.ref(workspaceId);
+  public async processWorkspaceById(workspaceId: string, paseoOverride?: any): Promise<boolean> {
+    if (!this.running) return false;
+    const paseoApi = paseoOverride || (await this.ensureConnection() ? this.paseo : null);
+    if (!paseoApi) return false;
+
+    const handle = paseoApi.workspaces.ref(workspaceId);
     const workspace = await handle.refresh();
     if (workspace) {
-      await this.processWorkspace(workspace);
+      return await this.processWorkspace(workspace, paseoApi);
     }
+    return false;
   }
 
   /**
    * Process a single workspace: validation, manual protection, task analysis, renaming.
    */
-  public async processWorkspace(workspace: any): Promise<boolean> {
+  public async processWorkspace(workspace: any, paseoOverride?: any): Promise<boolean> {
     if (!this.running) return false;
     const workspaceId = workspace.id || workspace.workspaceId;
     if (!workspaceId) return false;
 
-    // Mutex: Avoid concurrent runs for the same workspace
     if (this.processingLocks.has(workspaceId)) {
       return false;
     }
 
     this.processingLocks.add(workspaceId);
     try {
-      return await this.doProcessWorkspace(workspace);
+      return await this.doProcessWorkspace(workspace, paseoOverride);
     } finally {
       this.processingLocks.delete(workspaceId);
     }
   }
 
-  private async doProcessWorkspace(workspace: any): Promise<boolean> {
+  private async doProcessWorkspace(workspace: any, paseoOverride?: any): Promise<boolean> {
     if (!this.running) return false;
     const workspaceId = workspace.id || workspace.workspaceId;
     const currentTitle = workspace.title ?? null;
+    const paseoApi = paseoOverride || this.paseo;
 
     // 1. Check archive protection
     if (
@@ -217,17 +256,18 @@ export class WorkspaceTitleService {
     }
 
     // 2. Resolve root/primary agent for the workspace first
-    const rootAgent = await this.resolveRootAgent(workspaceId);
+    const rootAgent = await this.resolveRootAgent(workspaceId, paseoApi);
 
     // 3. Check if already formatted (Idempotency)
     const parsed = parseFormattedTitle(currentTitle);
     if (parsed) {
-      // Check if user context is Chinese but existing title topic was in English
+      const cleanT = cleanTopic(parsed.topic, workspace.projectDisplayName || workspace.name);
       const hasChineseContext =
         (rootAgent && /[\u4e00-\u9fa5]/.test(rootAgent.title || "")) ||
         /[\u4e00-\u9fa5]/.test(workspace.name || "");
-      const isEnglishTopic = !/[\u4e00-\u9fa5]/.test(parsed.topic);
+      const isEnglishTopic = !/[\u4e00-\u9fa5]/.test(cleanT);
 
+      // Only re-process if user context is Chinese but existing topic is English
       if (!(hasChineseContext && isEnglishTopic)) {
         this.store.recordNamed(workspaceId, currentTitle!);
         return false;
@@ -259,11 +299,10 @@ export class WorkspaceTitleService {
     }
 
     if (!rootAgent) {
-      // Workspace has no agents yet. Do not penalize or exhaust retries.
       return false;
     }
 
-    // Record attempt now that an agent is present
+    // Record attempt
     this.store.recordAttempt(workspaceId, currentTitle || undefined);
 
     // 6. Fetch actual createdAt of workspace
@@ -316,7 +355,6 @@ export class WorkspaceTitleService {
       return false;
     }
 
-    // 9. Check if current title is already this exact title
     if (currentTitle === newTitle) {
       this.store.recordNamed(workspaceId, newTitle);
       return false;
@@ -326,7 +364,10 @@ export class WorkspaceTitleService {
     console.log(
       `[workspace-title] Renaming workspace ${workspaceId} to "${newTitle}"`
     );
-    const handle = this.paseo.workspaces.ref(workspaceId);
+    if (!paseoApi) {
+      throw new Error("Paseo API instance unavailable for rename");
+    }
+    const handle = paseoApi.workspaces.ref(workspaceId);
     await handle.setTitle(newTitle);
 
     // Record success in store
@@ -337,9 +378,6 @@ export class WorkspaceTitleService {
     return true;
   }
 
-  /**
-   * Resolves workspace createdAt from ~/.paseo/projects/workspaces.json
-   */
   public async resolveWorkspaceCreatedAt(
     workspaceId: string,
     retries = 3,
@@ -366,9 +404,7 @@ export class WorkspaceTitleService {
             }
           }
         }
-      } catch {
-        // Ignore read/parse error on concurrent file write
-      }
+      } catch {}
 
       if (i < retries - 1) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -378,23 +414,19 @@ export class WorkspaceTitleService {
     return null;
   }
 
-  /**
-   * Finds the root/primary agent for the workspace (ignoring sub-agents).
-   */
-  public async resolveRootAgent(workspaceId: string): Promise<any | null> {
-    if (!this.paseo) return null;
+  public async resolveRootAgent(workspaceId: string, paseoOverride?: any): Promise<any | null> {
+    const paseoApi = paseoOverride || this.paseo;
+    if (!paseoApi) return null;
     try {
-      const res = await this.paseo.agents.list({
+      const res = await paseoApi.agents.list({
         page: { limit: 100 },
       });
       if (!res || !Array.isArray(res.entries)) return null;
 
-      // Filter agents belonging to this workspace and exclude sub-agents
       const rootAgents = res.entries
         .map((e: any) => e.agent || e)
         .filter((agent: any) => {
           if (!agent || agent.workspaceId !== workspaceId) return false;
-          // Ignore sub-agents
           if (agent.parentAgentId || agent.labels?.["paseo.parent-agent-id"]) {
             return false;
           }
@@ -403,7 +435,6 @@ export class WorkspaceTitleService {
 
       if (rootAgents.length === 0) return null;
 
-      // Sort by createdAt ascending: the FIRST root agent is the workspace's primary creator/task
       rootAgents.sort((a: any, b: any) => {
         const timeA = a.createdAt ? Date.parse(a.createdAt) : 0;
         const timeB = b.createdAt ? Date.parse(b.createdAt) : 0;
@@ -416,10 +447,10 @@ export class WorkspaceTitleService {
     }
   }
 
-  /**
-   * Fetch the first user prompt from the agent's timeline.
-   */
   public async fetchAgentFirstPrompt(agentId: string): Promise<string | null> {
+    if (!this.daemonClient) {
+      await this.ensureConnection();
+    }
     if (!this.daemonClient) return null;
     try {
       const timeline = await this.daemonClient.fetchAgentTimeline(agentId, {
@@ -438,9 +469,7 @@ export class WorkspaceTitleService {
           }
         }
       }
-    } catch {
-      // Ignore timeline fetch errors
-    }
+    } catch {}
     return null;
   }
 }

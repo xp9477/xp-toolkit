@@ -55,3 +55,10 @@ test("analyzeWorkspaceTask returns null if input is completely empty or meaningl
   });
   assert.equal(res, null);
 });
+
+test("getResolvedModelConfig strictly resolves gemini-3.5-flash-lite and never falls back to unauthorized models", () => {
+  const { getResolvedModelConfig } = require("../server/analyzer");
+  const meta = getResolvedModelConfig();
+  assert.equal(meta.model, "gemini-3.5-flash-lite");
+  assert.notEqual(meta.model, "gemini-3.8-flash-high");
+});

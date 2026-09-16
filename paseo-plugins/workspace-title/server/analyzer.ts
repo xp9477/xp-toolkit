@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 import { ALLOWED_TYPES, type ClassificationResult, type WorkspaceTaskType } from "../shared/types";
 import { cleanTopic, isValidType } from "../shared/formatter";
 
@@ -179,22 +180,37 @@ export function classifyHeuristic(
 /**
  * Reads Paseo config to resolve the configured metadata generation provider/model.
  */
-export function getPaseoMetadataProvider(): { provider: string; model?: string } {
+export function getResolvedModelConfig(): { provider: string; model: string; source: string } {
+  const candidateConfigPaths: string[] = [];
+  const paseoHome = process.env.PASEO_HOME || path.join(os.homedir(), ".paseo");
+  candidateConfigPaths.push(path.join(paseoHome, "workspace-title.config.json"));
+  candidateConfigPaths.push(path.join(paseoHome, "plugins", "workspace-title", "config.json"));
   try {
-    const paseoHome =
-      process.env.PASEO_HOME || path.join(os.homedir(), ".paseo");
-    const configPath = path.join(paseoHome, "config.json");
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      const mg = config.agents?.metadataGeneration?.providers?.[0];
-      if (mg && typeof mg.provider === "string") {
-        return { provider: mg.provider, model: mg.model };
+    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    candidateConfigPaths.push(path.resolve(currentDir, "../workspace-title.config.json"));
+  } catch {}
+
+  for (const configPath of candidateConfigPaths) {
+    try {
+      if (fs.existsSync(configPath)) {
+        const raw = fs.readFileSync(configPath, "utf-8");
+        try {
+          const cfg = JSON.parse(raw);
+          if (cfg && typeof cfg.model === "string" && cfg.model.trim()) {
+            return { provider: "codex", model: cfg.model.trim(), source: configPath };
+          }
+        } catch (jsonErr) {
+          console.error(
+            `[workspace-title] Failed to parse model config JSON at ${configPath}:`,
+            jsonErr
+          );
+        }
       }
-    }
-  } catch {
-    // Ignore read errors
+    } catch {}
   }
-  return { provider: "codex", model: "gemini-3.8-flash-high" };
+
+  // Default strictly to the exact requested model; never fallback to another model
+  return { provider: "codex", model: "gemini-3.5-flash-lite", source: "default" };
 }
 
 /**
@@ -205,8 +221,9 @@ export async function classifyWithLlm(
   projectName?: string | null,
   timeoutMs = 60000,
 ): Promise<ClassificationResult | null> {
-  const meta = getPaseoMetadataProvider();
-  const model = meta.model || "gemini-3.8-flash-high";
+  const meta = getResolvedModelConfig();
+  const model = meta.model;
+  console.log(`[workspace-title] LLM classifying via ${model} (source: ${meta.source})`);
 
   const prompt = [
     "你是一个任务分类助手。根据以下用户任务内容，提取任务类型与中文简洁主题。",

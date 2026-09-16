@@ -313,3 +313,76 @@ test("Concurrency: simultaneous processing of same workspace is serialized", asy
     cleanup();
   }
 });
+
+test("Self-healing connection: recovers from disconnected transport status", async () => {
+  const { service, cleanup } = createMockService();
+  try {
+    let connectCalled = false;
+    (service as any).daemonClient = {
+      getConnectionState: () => ({ status: "disconnected" }),
+      close: async () => {},
+    };
+    (service as any).initDaemonConnection = async () => {
+      connectCalled = true;
+      (service as any).daemonClient = {
+        getConnectionState: () => ({ status: "connected" }),
+      };
+      (service as any).paseo = {};
+    };
+
+    const isConnected = await (service as any).ensureConnection();
+    assert.equal(isConnected, true);
+    assert.equal(connectCalled, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("Single-flight connection: does not reconnect if already connected", async () => {
+  const { service, cleanup } = createMockService();
+  try {
+    let connectCount = 0;
+    (service as any).daemonClient = {
+      getConnectionState: () => ({ status: "connected" }),
+      close: async () => {},
+    };
+    (service as any).initDaemonConnection = async () => {
+      connectCount++;
+    };
+
+    const isConnected = await (service as any).ensureConnection();
+    assert.equal(isConnected, true);
+    assert.equal(connectCount, 0); // No reconnection performed
+  } finally {
+    cleanup();
+  }
+});
+
+test("Single-flight connection: concurrent ensureConnection calls only connect once", async () => {
+  const { service, cleanup } = createMockService();
+  try {
+    let connectCount = 0;
+    (service as any).daemonClient = null;
+    (service as any).initDaemonConnection = async () => {
+      connectCount++;
+      await new Promise((r) => setTimeout(r, 20));
+      (service as any).daemonClient = {
+        getConnectionState: () => ({ status: "connected" }),
+      };
+      (service as any).paseo = {};
+    };
+
+    const [c1, c2, c3] = await Promise.all([
+      (service as any).ensureConnection(),
+      (service as any).ensureConnection(),
+      (service as any).ensureConnection(),
+    ]);
+
+    assert.equal(c1, true);
+    assert.equal(c2, true);
+    assert.equal(c3, true);
+    assert.equal(connectCount, 1); // Only connected once despite 3 concurrent calls
+  } finally {
+    cleanup();
+  }
+});

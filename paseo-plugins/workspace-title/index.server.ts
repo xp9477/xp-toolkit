@@ -13,6 +13,57 @@ export default function contribute(server: PluginServerContext) {
     });
   }
 
+  // Register native Paseo 0.8 in-process lifecycle hooks (IPC, zero websocket drop risk)
+  if (typeof server.on === "function") {
+    server.on("workspace.created", (event, { paseo }) => {
+      if (serviceInstance && event?.workspace?.id) {
+        serviceInstance
+          .processWorkspaceById(event.workspace.id, paseo)
+          .catch((err) => {
+            console.error(
+              `[workspace-title] Hook error on workspace.created (${event.workspace.id}):`,
+              err
+            );
+          });
+      }
+    });
+
+    server.on("agent.created", (event, { paseo }) => {
+      if (
+        serviceInstance &&
+        event?.agent?.workspaceId &&
+        !event.agent.parentAgentId
+      ) {
+        serviceInstance
+          .processWorkspaceById(event.agent.workspaceId, paseo)
+          .catch((err) => {
+            console.error(
+              `[workspace-title] Hook error on agent.created (${event.agent.workspaceId}):`,
+              err
+            );
+          });
+      }
+    });
+
+    server.on("agent.turn_ended", (event, { paseo }) => {
+      if (
+        serviceInstance &&
+        event?.agent?.workspaceId &&
+        !event.agent.parentAgentId
+      ) {
+        serviceInstance
+          .processWorkspaceById(event.agent.workspaceId, paseo)
+          .catch((err) => {
+            console.error(
+              `[workspace-title] Hook error on agent.turn_ended (${event.agent.workspaceId}):`,
+              err
+            );
+          });
+      }
+    });
+  }
+
+  // RPC for UI status
   server.handle(getWorkspaceTitleStatusRpc, async ({ workspaceId }, { paseo }) => {
     const handle = paseo.workspaces.ref(workspaceId);
     const ws = await handle.refresh();
@@ -29,11 +80,11 @@ export default function contribute(server: PluginServerContext) {
     };
   });
 
+  // RPC for manual recheck trigger
   server.handle(recheckWorkspaceTitleRpc, async ({ workspaceId }, { paseo }) => {
     if (serviceInstance) {
       serviceInstance.getStore().resetWorkspace(workspaceId);
-      // Run renaming logic
-      await serviceInstance.processWorkspaceById(workspaceId);
+      await serviceInstance.processWorkspaceById(workspaceId, paseo);
     }
     const handle = paseo.workspaces.ref(workspaceId);
     const ws = await handle.refresh();
