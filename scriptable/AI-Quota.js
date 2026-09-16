@@ -456,8 +456,14 @@ function authIndexOf(file) {
 // ---------- Parsers ----------
 function parseGrokBilling(body) {
   const cfg = body?.config || body || {};
-  const usedPct = clampPct(Number(cfg.creditUsagePercent ?? cfg.credit_usage_percent));
+  let usedPct = clampPct(Number(cfg.creditUsagePercent ?? cfg.credit_usage_percent));
+  if (usedPct == null && cfg.currentPeriod) {
+    usedPct = 0;
+  }
   const remainingPct = usedPct == null ? null : clampPct(100 - usedPct);
+  if (remainingPct == null) {
+    throw new Error("无法解析 Grok 额度");
+  }
   const periodEnd = cfg.currentPeriod?.end || cfg.billingPeriodEnd || cfg.billing_period_end || null;
 
   return {
@@ -474,7 +480,7 @@ function parseGrokBilling(body) {
     reset5hAt: null,
     extra: "",
     url: URLS.grok,
-    ok: remainingPct != null,
+    ok: true,
   };
 }
 

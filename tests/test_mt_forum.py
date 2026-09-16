@@ -122,7 +122,10 @@ class MtForumResponseTests(unittest.TestCase):
                 if self.get_count == 1:
                     return FakeResponse('<input name="formhash" value="login123">')
                 params = kwargs.get("params") or {}
-                if "operation=qiandao" in str(url) or params.get("operation") == "qiandao":
+                if (
+                    "operation=qiandao" in str(url)
+                    or params.get("operation") == "qiandao"
+                ):
                     self.sign_attempts += 1
                     if self.sign_attempts == 1:
                         return FakeResponse("<![CDATA[请稍后再试]]>")

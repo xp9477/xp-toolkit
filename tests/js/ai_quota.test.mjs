@@ -25,7 +25,7 @@ const context = vm.createContext({ Color, console });
 vm.runInContext(
   `${source.slice(0, end)}\n` +
     "globalThis.testApi = { hasAnyAuth, normalizeCpaBaseUrl, cacheScope, authIndexOf, serviceTapURL, " +
-    "findCpaFiles, averageServices, normalizeUsageWindow, parseChatGPTUsage, parseAntigravity };",
+    "findCpaFiles, averageServices, normalizeUsageWindow, parseChatGPTUsage, parseAntigravity, parseGrokBilling };",
   context
 );
 const api = context.testApi;
@@ -96,6 +96,43 @@ test("ChatGPT parser chooses the longest active window", () => {
   assert.equal(parsed.remainingPct, 70);
   assert.equal(parsed.windowLabel, "本周");
   assert.match(parsed.extra, /5小时剩 90%/);
+});
+
+test("Grok parser handles missing creditUsagePercent when currentPeriod exists", () => {
+  const parsed = api.parseGrokBilling({
+    config: {
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-09-16T03:51:39.117402+00:00",
+        end: "2026-09-23T03:51:39.117402+00:00",
+      },
+    },
+  });
+  assert.equal(parsed.remainingPct, 100);
+  assert.equal(parsed.usedPct, 0);
+  assert.equal(parsed.windowLabel, "本周");
+  assert.ok(parsed.ok);
+});
+
+test("Grok parser uses explicit creditUsagePercent when present", () => {
+  const parsed = api.parseGrokBilling({
+    config: {
+      creditUsagePercent: 25,
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        end: "2026-09-23T03:51:39.117402+00:00",
+      },
+    },
+  });
+  assert.equal(parsed.remainingPct, 75);
+  assert.equal(parsed.usedPct, 25);
+});
+
+test("Grok parser rejects responses without quota data or billing period", () => {
+  assert.throws(
+    () => api.parseGrokBilling({ config: {} }),
+    /无法解析 Grok 额度/
+  );
 });
 
 test("Google parser rejects responses without quota buckets", () => {
