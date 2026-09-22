@@ -430,8 +430,23 @@ export function QuotaWidget({
 }
 
 // Widget lifecycle
-const data = await fetchQuotaData();
-Widget.present(<QuotaWidget data={data} />, {
-  policy: "after",
-  date: new Date(Date.now() + 15 * 60 * 1000),
-});
+(async () => {
+  try {
+    const data = await fetchQuotaData();
+    Widget.present(<QuotaWidget data={data} />, {
+      policy: "after",
+      date: new Date(Date.now() + 15 * 60 * 1000),
+    });
+  } catch (e: any) {
+    Widget.present(
+      <VStack alignment="center" spacing={4} padding={{ all: 14 }} widgetBackground="systemBackground">
+        <Text font={{ size: 12, weight: "bold" }} foregroundColor="#EF4444">
+          AI Quota 加载失败
+        </Text>
+        <Text font={{ size: 10 }} foregroundColor={UI.muted} lineLimit={2}>
+          {String(e?.message || e)}
+        </Text>
+      </VStack>
+    );
+  }
+})();

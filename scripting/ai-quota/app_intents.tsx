@@ -10,6 +10,6 @@ export const ReloadQuotaIntent = AppIntentManager.register({
     } catch (e) {
       console.error("ReloadQuotaIntent fetchQuotaData failed", e);
     }
-    Widget.reloadAll();
+    await Widget.reloadAll();
   },
 });

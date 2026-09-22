@@ -33,24 +33,16 @@ export function serviceTapURL(id: string): string {
   return nativeAppURL(id);
 }
 
-let ScriptingModule: any = null;
-try {
-  // @ts-ignore
-  ScriptingModule = await import("scripting");
-} catch {
-  // Node test runner environment
-}
-
 function getWidget(): any {
-  return ScriptingModule?.Widget ?? (globalThis as any).Widget;
+  return typeof Widget !== "undefined" ? Widget : (globalThis as any).Widget;
 }
 
 function getKeychain(): any {
-  return ScriptingModule?.Keychain ?? (globalThis as any).Keychain;
+  return typeof Keychain !== "undefined" ? Keychain : (globalThis as any).Keychain;
 }
 
 function getStorage(): any {
-  return ScriptingModule?.Storage ?? (globalThis as any).Storage;
+  return typeof Storage !== "undefined" ? Storage : (globalThis as any).Storage;
 }
 
 // ---------- Config ----------
@@ -769,7 +761,8 @@ export async function fetchAll(cfg: Config): Promise<QuotaData> {
       errors.push(`CPA: ${friendlyHttpError(e)}`);
     }
   }
-  const jobs: [ServiceId, () => Promise<ServiceQuota>, string, string][] = [
+  type Job = [ServiceId, () => Promise<ServiceQuota>, string, string];
+  const jobs: Job[] = [
     ["grok", () => fetchGrok(cfg, files), "SuperGrok", URLS.grok],
     ["chatgpt", () => fetchChatGPT(cfg, files), "ChatGPT", URLS.chatgpt],
     ["gemini", () => fetchGemini(cfg, files), "Gemini", URLS.gemini],
