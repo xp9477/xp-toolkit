@@ -22,3 +22,9 @@ payload:
   - DOMAIN-SUFFIX,letsencrypt.org
   - DOMAIN-SUFFIX,linuxdo.org
   - DOMAIN-SUFFIX,missav.ai
+# > KLA
+  - DOMAIN-SUFFIX,kla.com
+  - DOMAIN-SUFFIX,kla-tencor.com
+  - DOMAIN-SUFFIX,klatencor.com
+  - DOMAIN-SUFFIX,kla-corp.com
+  - DOMAIN-SUFFIX,kla.cn
