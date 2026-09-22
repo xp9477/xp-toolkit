@@ -11,7 +11,7 @@
 | `proxy/loon/` | Loon 规则、插件、脚本 |
 | `skills/` | 自建 Codex / Agent Skills |
 | `raycast/` | 预留：Raycast 插件 |
-| `scriptable/` | iOS Scriptable 组件与脚本（AI 套餐用量） |
+| `scripting/` | iOS Scripting 组件与脚本（AI 套餐用量） |
 | `userscripts/` | 浏览器油猴脚本 |
 | `.github/` | 质量门禁、依赖更新与规则跨端同步 CI |
 

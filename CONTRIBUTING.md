@@ -29,7 +29,10 @@ pip-audit -r qinglong/requirements.txt --progress-spinner=off
 ```bash
 while IFS= read -r -d '' file; do
   node --input-type=module --check < "$file"
-done < <(find scriptable userscripts proxy/loon/script -type f -name '*.js' -print0)
+done < <(find userscripts proxy/loon/script -type f -name '*.js' -print0)
+while IFS= read -r -d '' file; do
+  node --check --experimental-strip-types "$file"
+done < <(find scripting -type f -name '*.ts' -print0)
 ```
 
 ## 变更约束
@@ -71,7 +74,7 @@ python .github/scripts/check_rules.py --offline
 - 避免修改全局浏览器 API。必须拦截时仅处理精确端点并添加回归测试。
 - 审查 `@match`、`@connect` 和 `@grant`，只保留功能真正需要的权限。
 
-### Scriptable
+### Scripting
 
 - 每次可执行代码变化都递增版本注释或发布标识。
 - 凭据使用 Keychain；小组件参数含秘密时在文档中明确风险。

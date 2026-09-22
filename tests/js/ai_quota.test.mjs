@@ -1,34 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
-
-const source = readFileSync(
-  new URL("../../scriptable/AI-Quota.js", import.meta.url),
-  "utf8"
-);
-const end = source.indexOf("// ---------- Draw ----------");
-assert.ok(end > 0, "AI-Quota core marker not found");
-
-class Color {
-  constructor(hex, alpha) {
-    this.hex = hex;
-    this.alpha = alpha;
-  }
-
-  static dynamic(light, dark) {
-    return { light, dark };
-  }
-}
-
-const context = vm.createContext({ Color, console });
-vm.runInContext(
-  `${source.slice(0, end)}\n` +
-    "globalThis.testApi = { hasAnyAuth, normalizeCpaBaseUrl, cacheScope, authIndexOf, serviceTapURL, " +
-    "findCpaFiles, averageServices, normalizeUsageWindow, parseChatGPTUsage, parseAntigravity, parseGrokBilling };",
-  context
-);
-const api = context.testApi;
+import * as api from "../../scripting/ai-quota/api.ts";
 
 test("configuration requires both CPA address and key", () => {
   assert.equal(
