@@ -114,14 +114,14 @@ function ConfigApp() {
             disabled={loading}
           />
           {status ? (
-            <Text font={{ size: 13 }} foregroundColor={UI.muted}>
+            <Text font={13} foregroundColor={UI.muted}>
               {status}
             </Text>
           ) : null}
           {quotaSummary ? (
             <VStack alignment="leading" spacing={4} padding={{ vertical: 4 }}>
-              <Text font={{ size: 13, weight: "semibold" }}>实时配额情况：</Text>
-              <Text font={{ size: 12 }} foregroundColor={UI.muted}>
+              <Text font={13} fontWeight="semibold">实时配额情况：</Text>
+              <Text font={12} foregroundColor={UI.muted}>
                 {quotaSummary}
               </Text>
             </VStack>

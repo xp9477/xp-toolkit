@@ -8,15 +8,13 @@ import {
   Link,
   Button,
   Capsule,
-  RoundedRectangle,
   Spacer,
   Divider,
   DateLabel,
   GeometryReader,
-  Color,
 } from "scripting";
 import type { QuotaData, ServiceQuota, ServiceAccountDetail } from "./types";
-import { UI, Colors, accentFor, accentFor5h, shortenHint } from "./theme";
+import { UI, accentFor, accentFor5h, shortenHint, type AccentColor } from "./theme";
 import { fetchQuotaData, pctLabel } from "./api";
 import { ReloadQuotaIntent } from "./app_intents";
 
@@ -26,7 +24,7 @@ function ProgressBar({
   height = 4,
 }: {
   pct: number | null;
-  color: any;
+  color: AccentColor;
   height?: number;
 }) {
   const clamped = Math.max(0, Math.min(100, pct ?? 0)) / 100;
@@ -39,13 +37,13 @@ function ProgressBar({
           return (
             <ZStack alignment="leading">
               <Capsule fill={UI.track} frame={{ width: totalW, height }} />
-              {clamped > 0 && (
+              {clamped > 0 ? (
                 <Capsule
                   fill={color}
                   frame={{ width: fillW, height }}
                   widgetAccentable
                 />
-              )}
+              ) : null}
             </ZStack>
           );
         }}
@@ -58,12 +56,12 @@ function FreshnessBadge({ isCached }: { isCached?: boolean }) {
   return (
     <HStack spacing={3} alignment="center">
       <Text
-        font={{ size: 8 }}
-        foregroundColor={isCached ? "#F59E0B" : "#10B981"}
+        font={8}
+        foregroundColor={isCached ? "systemOrange" : "systemGreen"}
       >
         ●
       </Text>
-      <Text font={{ size: 9 }} foregroundColor={UI.muted}>
+      <Text font={9} foregroundColor={UI.muted}>
         {isCached ? "缓存" : "在线"}
       </Text>
     </HStack>
@@ -75,27 +73,24 @@ function ServiceColumn({ service }: { service: ServiceQuota }) {
   const countNotice =
     service.accountCount && service.accountCount > 1
       ? ` (${service.accountCount}账号)`
-      : "";
+      : null;
   const resetText = service.resetHint ? shortenHint(service.resetHint) : service.windowLabel;
 
   return (
     <Link url={service.url}>
       <VStack alignment="leading" spacing={4}>
         <HStack alignment="center">
-          <Text
-            font={{ size: 12, weight: "semibold" }}
-            foregroundColor={UI.ink}
-          >
+          <Text font={12} fontWeight="semibold" foregroundColor={UI.ink}>
             {service.name}
           </Text>
-          {countNotice && (
-            <Text font={{ size: 8 }} foregroundColor={UI.faint}>
+          {countNotice ? (
+            <Text font={8} foregroundColor={UI.faint}>
               {countNotice}
             </Text>
-          )}
+          ) : null}
           <Spacer />
           {service.plan ? (
-            <Text font={{ size: 9 }} foregroundColor={UI.muted}>
+            <Text font={9} foregroundColor={UI.muted}>
               {service.plan}
             </Text>
           ) : null}
@@ -103,17 +98,18 @@ function ServiceColumn({ service }: { service: ServiceQuota }) {
 
         <HStack alignment="firstTextBaseline" spacing={2}>
           <Text
-            font={{ size: 24, weight: "bold" }}
+            font={24}
+            fontWeight="bold"
             foregroundColor={accentFor(service.remainingPct)}
             widgetAccentable
           >
             {remainingText}
           </Text>
-          <Text font={{ size: 11, weight: "semibold" }} foregroundColor={UI.muted}>
+          <Text font={11} fontWeight="semibold" foregroundColor={UI.muted}>
             %
           </Text>
           <Spacer />
-          <Text font={{ size: 9 }} foregroundColor={UI.muted}>
+          <Text font={9} foregroundColor={UI.muted}>
             {resetText}
           </Text>
         </HStack>
@@ -127,22 +123,23 @@ function ServiceColumn({ service }: { service: ServiceQuota }) {
         {service.remaining5hPct != null ? (
           <VStack alignment="leading" spacing={2} padding={{ top: 2 }}>
             <HStack alignment="center">
-              <Text font={{ size: 8 }} foregroundColor={UI.muted}>
+              <Text font={8} foregroundColor={UI.muted}>
                 5h 窗口
               </Text>
               <Spacer />
               <Text
-                font={{ size: 9, weight: "semibold" }}
+                font={9}
+                fontWeight="semibold"
                 foregroundColor={accentFor5h(service.remaining5hPct)}
                 widgetAccentable
               >
                 {pctLabel(service.remaining5hPct)}%
               </Text>
-              {service.reset5hHint && (
-                <Text font={{ size: 8 }} foregroundColor={UI.faint}>
+              {service.reset5hHint ? (
+                <Text font={8} foregroundColor={UI.faint}>
                   ({shortenHint(service.reset5hHint)})
                 </Text>
-              )}
+              ) : null}
             </HStack>
             <ProgressBar
               pct={service.remaining5hPct}
@@ -162,12 +159,13 @@ function SmallServiceRow({ service }: { service: ServiceQuota }) {
     <Link url={service.url}>
       <VStack alignment="leading" spacing={2}>
         <HStack alignment="center">
-          <Text font={{ size: 11, weight: "semibold" }} foregroundColor={UI.ink}>
+          <Text font={11} fontWeight="semibold" foregroundColor={UI.ink}>
             {service.name}
           </Text>
           <Spacer />
           <Text
-            font={{ size: 12, weight: "bold" }}
+            font={12}
+            fontWeight="bold"
             foregroundColor={accentFor(service.remainingPct)}
             widgetAccentable
           >
@@ -179,95 +177,105 @@ function SmallServiceRow({ service }: { service: ServiceQuota }) {
           color={accentFor(service.remainingPct)}
           height={4}
         />
-        <HStack>
-          <Text font={{ size: 8 }} foregroundColor={UI.faint}>
+        <HStack alignment="center">
+          <Text font={9} foregroundColor={UI.muted}>
             {resetText}
           </Text>
           <Spacer />
-          {service.remaining5hPct != null && (
-            <Text font={{ size: 8 }} foregroundColor={accentFor5h(service.remaining5hPct)}>
-              5h {pctLabel(service.remaining5hPct)}%
+          {service.remaining5hPct != null ? (
+            <Text font={8} foregroundColor={accentFor5h(service.remaining5hPct)}>
+              5h:{pctLabel(service.remaining5hPct)}%
             </Text>
-          )}
+          ) : null}
         </HStack>
       </VStack>
     </Link>
   );
 }
 
-function AccountRow({ detail, serviceName }: { detail: ServiceAccountDetail; serviceName: string }) {
+function AccountRow({
+  detail,
+  serviceName,
+}: {
+  detail: ServiceAccountDetail;
+  serviceName: string;
+}) {
   return (
-    <HStack alignment="center" spacing={4}>
-      <Text font={{ size: 10, weight: "medium" }} foregroundColor={UI.ink}>
-        {serviceName} · {detail.name}
+    <HStack alignment="center" spacing={6}>
+      <Text font={10} fontWeight="bold" foregroundColor={UI.ink}>
+        {serviceName}
+      </Text>
+      <Text font={10} foregroundColor={UI.muted} lineLimit={1}>
+        {detail.name}
       </Text>
       <Spacer />
-      <Text font={{ size: 10, weight: "bold" }} foregroundColor={accentFor(detail.remainingPct)}>
-        周 {pctLabel(detail.remainingPct)}%
+      <Text font={9} fontWeight="semibold" foregroundColor={accentFor(detail.remainingPct)}>
+        {pctLabel(detail.remainingPct)}%
       </Text>
-      {detail.resetHint && (
-        <Text font={{ size: 8 }} foregroundColor={UI.faint}>
+      {detail.resetHint ? (
+        <Text font={8} foregroundColor={UI.faint}>
           ({shortenHint(detail.resetHint)})
         </Text>
-      )}
-      {detail.remaining5hPct != null && (
-        <Text font={{ size: 9 }} foregroundColor={accentFor5h(detail.remaining5hPct)}>
-          5h {pctLabel(detail.remaining5hPct)}%
+      ) : null}
+      {detail.remaining5hPct != null ? (
+        <Text font={8} foregroundColor={accentFor5h(detail.remaining5hPct)}>
+          5h:{pctLabel(detail.remaining5hPct)}%
         </Text>
-      )}
+      ) : null}
     </HStack>
   );
 }
 
-export function QuotaWidget({
-  data,
-  family,
-}: {
-  data: QuotaData;
-  family?: string;
-}) {
-  const f = family || Widget.family;
+export function QuotaWidget({ data }: { data: QuotaData }) {
+  const f = Widget.family;
 
   if (f === "accessoryInline") {
     return (
-      <Text>
-        Grok {pctLabel(data.grok.remainingPct)}% · GPT {pctLabel(data.chatgpt.remainingPct)}% · Gem {pctLabel(data.gemini.remainingPct)}%
+      <Text font={10}>
+        Grok:{pctLabel(data.grok.remainingPct)}% · GPT:{pctLabel(data.chatgpt.remainingPct)}% · Gem:{pctLabel(data.gemini.remainingPct)}%
       </Text>
     );
   }
 
   if (f === "accessoryRectangular") {
     return (
-      <VStack alignment="leading" spacing={2} padding={{ all: 2 }}>
+      <VStack alignment="leading" spacing={3} padding={4}>
         <HStack alignment="center">
-          <Text font={{ size: 9, weight: "bold" }}>AI QUOTA</Text>
+          <Text font={10} fontWeight="bold" foregroundColor={UI.ink}>
+            AI Quota
+          </Text>
           <Spacer />
-          <DateLabel date={new Date(data.fetchedAt)} style="relative" font={{ size: 8 }} />
+          <DateLabel
+            date={new Date(data.fetchedAt)}
+            style="relative"
+            font={8}
+            foregroundColor={UI.muted}
+          />
         </HStack>
-        <HStack spacing={4} alignment="center">
-          <VStack alignment="leading" spacing={1}>
-            <Text font={{ size: 8 }} foregroundColor="secondaryLabel">
+        <HStack spacing={8} alignment="center">
+          <VStack alignment="center" spacing={1}>
+            <Text font={8} foregroundColor={UI.muted}>
               Grok
             </Text>
-            <Text font={{ size: 11, weight: "bold" }} widgetAccentable>
+            <Text font={12} fontWeight="bold" foregroundColor={accentFor(data.grok.remainingPct)}>
               {pctLabel(data.grok.remainingPct)}%
             </Text>
           </VStack>
           <Divider />
-          <VStack alignment="leading" spacing={1}>
-            <Text font={{ size: 8 }} foregroundColor="secondaryLabel">
+          <VStack alignment="center" spacing={1}>
+            <Text font={8} foregroundColor={UI.muted}>
               GPT
             </Text>
-            <Text font={{ size: 11, weight: "bold" }} widgetAccentable>
+            <Text font={12} fontWeight="bold" foregroundColor={accentFor(data.chatgpt.remainingPct)}>
               {pctLabel(data.chatgpt.remainingPct)}%
             </Text>
           </VStack>
           <Divider />
-          <VStack alignment="leading" spacing={1}>
-            <Text font={{ size: 8 }} foregroundColor="secondaryLabel">
-              Gem
+          <VStack alignment="center" spacing={1}>
+            <Text font={8} foregroundColor={UI.muted}>
+              Gemini
             </Text>
-            <Text font={{ size: 11, weight: "bold" }} widgetAccentable>
+            <Text font={12} fontWeight="bold" foregroundColor={accentFor(data.gemini.remainingPct)}>
               {pctLabel(data.gemini.remainingPct)}%
             </Text>
           </VStack>
@@ -281,11 +289,11 @@ export function QuotaWidget({
       <VStack
         alignment="leading"
         spacing={6}
-        padding={{ all: 12 }}
+        padding={12}
         widgetBackground="systemBackground"
       >
         <HStack alignment="center">
-          <Text font={{ size: 11, weight: "bold" }} foregroundColor={UI.ink}>
+          <Text font={11} fontWeight="bold" foregroundColor={UI.ink}>
             AI Quota
           </Text>
           <Spacer />
@@ -293,13 +301,13 @@ export function QuotaWidget({
           <DateLabel
             date={new Date(data.fetchedAt)}
             style="relative"
-            font={{ size: 8 }}
+            font={8}
             foregroundColor={UI.muted}
           />
           <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
             <Image
               systemName="arrow.clockwise"
-              font={{ size: 9, weight: "medium" }}
+              imageScale="small"
               foregroundColor={UI.muted}
             />
           </Button>
@@ -330,20 +338,20 @@ export function QuotaWidget({
       <VStack
         alignment="leading"
         spacing={10}
-        padding={{ all: 16 }}
+        padding={16}
         widgetBackground="systemBackground"
       >
         {/* Top bar */}
         <HStack alignment="center">
           <HStack spacing={6} alignment="center">
-            <Text font={{ size: 14, weight: "bold" }} foregroundColor={UI.ink}>
+            <Text font={14} fontWeight="bold" foregroundColor={UI.ink}>
               AI Quota
             </Text>
             <FreshnessBadge isCached={data.isCached} />
             <DateLabel
               date={new Date(data.fetchedAt)}
               style="relative"
-              font={{ size: 10 }}
+              font={10}
               foregroundColor={UI.muted}
             />
           </HStack>
@@ -351,7 +359,7 @@ export function QuotaWidget({
           <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
             <Image
               systemName="arrow.clockwise"
-              font={{ size: 12, weight: "semibold" }}
+              imageScale="small"
               foregroundColor={UI.muted}
             />
           </Button>
@@ -370,7 +378,7 @@ export function QuotaWidget({
 
         {/* Detailed accounts */}
         <VStack alignment="leading" spacing={4}>
-          <Text font={{ size: 11, weight: "semibold" }} foregroundColor={UI.muted}>
+          <Text font={11} fontWeight="semibold" foregroundColor={UI.muted}>
             多账号明细
           </Text>
           {allDetails.length > 0 ? (
@@ -378,7 +386,7 @@ export function QuotaWidget({
               <AccountRow key={idx} detail={item.detail} serviceName={item.serviceName} />
             ))
           ) : (
-            <Text font={{ size: 10 }} foregroundColor={UI.faint}>
+            <Text font={10} foregroundColor={UI.faint}>
               暂无更多子账号数据
             </Text>
           )}
@@ -392,19 +400,19 @@ export function QuotaWidget({
     <VStack
       alignment="leading"
       spacing={8}
-      padding={{ all: 14 }}
+      padding={14}
       widgetBackground="systemBackground"
     >
       <HStack alignment="center">
         <HStack spacing={6} alignment="center">
-          <Text font={{ size: 13, weight: "bold" }} foregroundColor={UI.ink}>
+          <Text font={13} fontWeight="bold" foregroundColor={UI.ink}>
             AI Quota
           </Text>
           <FreshnessBadge isCached={data.isCached} />
           <DateLabel
             date={new Date(data.fetchedAt)}
             style="relative"
-            font={{ size: 10 }}
+            font={10}
             foregroundColor={UI.muted}
           />
         </HStack>
@@ -412,7 +420,7 @@ export function QuotaWidget({
         <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
           <Image
             systemName="arrow.clockwise"
-            font={{ size: 11, weight: "medium" }}
+            imageScale="small"
             foregroundColor={UI.muted}
           />
         </Button>
@@ -439,11 +447,11 @@ export function QuotaWidget({
     });
   } catch (e: any) {
     Widget.present(
-      <VStack alignment="center" spacing={4} padding={{ all: 14 }} widgetBackground="systemBackground">
-        <Text font={{ size: 12, weight: "bold" }} foregroundColor="#EF4444">
+      <VStack alignment="center" spacing={4} padding={14} widgetBackground="systemBackground">
+        <Text font={12} fontWeight="bold" foregroundColor="systemRed">
           AI Quota 加载失败
         </Text>
-        <Text font={{ size: 10 }} foregroundColor={UI.muted} lineLimit={2}>
+        <Text font={10} foregroundColor={UI.muted} lineLimit={2}>
           {String(e?.message || e)}
         </Text>
       </VStack>

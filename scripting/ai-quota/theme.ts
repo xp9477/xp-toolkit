@@ -1,48 +1,50 @@
-export interface DynamicColor {
-  light: string;
-  dark: string;
-}
+export type AccentColor =
+  | "systemGreen"
+  | "systemOrange"
+  | "systemRed"
+  | "systemBlue"
+  | "secondaryLabel";
 
 export const UI = {
-  ink: { light: "#1C1B18", dark: "#F2F4F7" } as DynamicColor,
-  muted: { light: "#7A766F", dark: "#8B93A0" } as DynamicColor,
-  faint: { light: "#B0ABA3", dark: "#5C6470" } as DynamicColor,
-  rule: { light: "#E6E2DA", dark: "#1E2630" } as DynamicColor,
-  track: { light: "#EDE9E2", dark: "#3F3E39" } as DynamicColor,
+  ink: "label" as const,
+  muted: "secondaryLabel" as const,
+  faint: "tertiaryLabel" as const,
+  rule: "separator" as const,
+  track: "tertiarySystemFill" as const,
 };
 
 export const Colors = {
-  ok: { light: "#3E9A48", dark: "#7DCE78" } as DynamicColor,
-  warn: { light: "#C56A12", dark: "#E08A2E" } as DynamicColor,
-  bad: { light: "#C04040", dark: "#E07070" } as DynamicColor,
-  ok5h: { light: "#0284C7", dark: "#38BDF8" } as DynamicColor,
+  ok: "systemGreen" as const,
+  warn: "systemOrange" as const,
+  bad: "systemRed" as const,
+  ok5h: "systemBlue" as const,
 };
 
-export function ok(): DynamicColor {
+export function ok(): AccentColor {
   return Colors.ok;
 }
 
-export function warn(): DynamicColor {
+export function warn(): AccentColor {
   return Colors.warn;
 }
 
-export function bad(): DynamicColor {
+export function bad(): AccentColor {
   return Colors.bad;
 }
 
-export function ok5h(): DynamicColor {
+export function ok5h(): AccentColor {
   return Colors.ok5h;
 }
 
-export function accentFor(remainingPct: number | null): DynamicColor {
-  if (remainingPct == null) return UI.faint;
+export function accentFor(remainingPct: number | null): AccentColor {
+  if (remainingPct == null) return "secondaryLabel";
   if (remainingPct <= 8) return Colors.bad;
   if (remainingPct <= 22) return Colors.warn;
   return Colors.ok;
 }
 
-export function accentFor5h(remainingPct: number | null): DynamicColor {
-  if (remainingPct == null) return UI.faint;
+export function accentFor5h(remainingPct: number | null): AccentColor {
+  if (remainingPct == null) return "secondaryLabel";
   if (remainingPct <= 8) return Colors.bad;
   if (remainingPct <= 22) return Colors.warn;
   return Colors.ok5h;
