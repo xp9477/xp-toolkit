@@ -1,0 +1,15 @@
+{
+  "name": "AI-Quota",
+  "localizedNames": {
+    "zh": "AI 配额监控",
+    "en": "AI Quota"
+  },
+  "icon": "chart.bar.fill",
+  "color": "#3B82F6",
+  "version": "1.0.0",
+  "runInApp": true,
+  "description": "Monitor remaining quota for SuperGrok, ChatGPT Plus, and Google AI Pro.",
+  "localizedDescriptions": {
+    "zh": "实时监控 SuperGrok、ChatGPT Plus / Pro 与 Google AI Pro 剩余额度与重置时间。"
+  }
+}
