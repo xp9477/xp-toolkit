@@ -33,16 +33,26 @@ export function serviceTapURL(id: string): string {
   return nativeAppURL(id);
 }
 
+// Keychain and Storage are host namespaces, not exports of "scripting".
+// https://scriptingapp.github.io/guide/Device%20Capabilities/Keychain
+// https://scriptingapp.github.io/guide/Utilities/Storage
+// Widget is imported by entry files; widget.tsx/app_intents.tsx also see it as a global.
+// Look them up on globalThis so the compiler does not rewrite them into
+// `import { Keychain } from "scripting"` (that binding is undefined at runtime).
+function hostGlobal(name: "Widget" | "Keychain" | "Storage"): any {
+  return (globalThis as any)[name];
+}
+
 export function getWidget(): any {
-  return typeof Widget !== "undefined" ? Widget : (globalThis as any).Widget;
+  return hostGlobal("Widget");
 }
 
 export function getKeychain(): any {
-  return typeof Keychain !== "undefined" ? Keychain : (globalThis as any).Keychain;
+  return hostGlobal("Keychain");
 }
 
 export function getStorage(): any {
-  return typeof Storage !== "undefined" ? Storage : (globalThis as any).Storage;
+  return hostGlobal("Storage");
 }
 
 // ---------- Config ----------

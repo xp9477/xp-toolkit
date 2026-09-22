@@ -23,9 +23,6 @@ import {
 } from "./api";
 import { UI } from "./theme";
 
-declare const Keychain: any;
-declare const Storage: any;
-
 function ConfigApp() {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -35,16 +32,12 @@ function ConfigApp() {
 
   useEffect(() => {
     try {
-      const kc = getKeychain();
-      const st = getStorage();
-      const storedBase =
-        (kc?.get?.(KEY.cpaBase) ?? "") ||
-        (st?.get?.(KEY.cpaBase) ?? "") ||
-        "";
-      const storedKey =
-        (kc?.get?.(KEY.cpaKey) ?? "") ||
-        (st?.get?.(KEY.cpaKey) ?? "") ||
-        "";
+      // https://scriptingapp.github.io/guide/Device%20Capabilities/Keychain
+      // https://scriptingapp.github.io/guide/Utilities/Storage
+      const keychain = getKeychain();
+      const storage = getStorage();
+      const storedBase = keychain?.get(KEY.cpaBase) || storage?.get(KEY.cpaBase) || "";
+      const storedKey = keychain?.get(KEY.cpaKey) || storage?.get(KEY.cpaKey) || "";
       if (storedBase) setBaseUrl(storedBase);
       if (storedKey) setApiKey(storedKey);
     } catch (_) {}
@@ -54,32 +47,19 @@ function ConfigApp() {
     try {
       const cleanUrl = normalizeCpaBaseUrl(baseUrl);
       const cleanKey = apiKey.trim();
-      const kc = getKeychain();
-      const st = getStorage();
-      let saved = false;
-      if (kc?.set) {
-        kc.set(KEY.cpaBase, cleanUrl);
-        kc.set(KEY.cpaKey, cleanKey);
-        saved = true;
+      const keychain = getKeychain();
+      const storage = getStorage();
+      if (!keychain?.set || !storage?.set) {
+        setStatus("当前环境没有 Keychain / Storage");
+        return false;
       }
-      if (st?.set) {
-        st.set(KEY.cpaBase, cleanUrl);
-        st.set(KEY.cpaKey, cleanKey);
-        saved = true;
+      const keyOk = keychain.set(KEY.cpaBase, cleanUrl) && keychain.set(KEY.cpaKey, cleanKey);
+      const storeOk = storage.set(KEY.cpaBase, cleanUrl) && storage.set(KEY.cpaKey, cleanKey);
+      if (!keyOk || !storeOk) {
+        setStatus("保存失败");
+        return false;
       }
-      if (!saved) {
-        // Fallback to direct globals if available
-        if (typeof Keychain !== "undefined" && Keychain.set) {
-          Keychain.set(KEY.cpaBase, cleanUrl);
-          Keychain.set(KEY.cpaKey, cleanKey);
-          saved = true;
-        } else if (typeof Storage !== "undefined" && Storage.set) {
-          Storage.set(KEY.cpaBase, cleanUrl);
-          Storage.set(KEY.cpaKey, cleanKey);
-          saved = true;
-        }
-      }
-      setStatus("配置已成功保存到 Keychain 与 Storage");
+      setStatus("配置已保存");
       return true;
     } catch (e: any) {
       setStatus(`保存失败: ${e.message || e}`);
@@ -149,14 +129,14 @@ function ConfigApp() {
             disabled={loading}
           />
           {status ? (
-            <Text font={13} foregroundColor={UI.muted}>
+            <Text font={13} foregroundStyle={UI.muted}>
               {status}
             </Text>
           ) : null}
           {quotaSummary ? (
             <VStack alignment="leading" spacing={4} padding={{ vertical: 4 }}>
               <Text font={13} fontWeight="semibold">实时配额情况：</Text>
-              <Text font={12} foregroundColor={UI.muted}>
+              <Text font={12} foregroundStyle={UI.muted}>
                 {quotaSummary}
               </Text>
             </VStack>

@@ -1,50 +1,36 @@
-export type AccentColor =
-  | "systemGreen"
-  | "systemOrange"
-  | "systemRed"
-  | "systemBlue"
-  | "secondaryLabel";
+// Colors follow ShapeStyle / DynamicShapeStyle:
+// https://scriptingapp.github.io/guide/Types/ShapeStyle
+// https://scriptingapp.github.io/guide/Types/DynamicShapeStyle
+
+export interface DynamicShapeStyle {
+  light: string;
+  dark: string;
+}
 
 export const UI = {
-  ink: "label" as const,
-  muted: "secondaryLabel" as const,
-  faint: "tertiaryLabel" as const,
-  rule: "separator" as const,
-  track: "tertiarySystemFill" as const,
-};
+  ink: { light: "#1C1B18", dark: "#F2F4F7" },
+  muted: { light: "#7A766F", dark: "#8B93A0" },
+  faint: { light: "#B0ABA3", dark: "#5C6470" },
+  rule: { light: "#E6E2DA", dark: "#1E2630" },
+  track: { light: "#EDE9E2", dark: "#3F3E39" },
+} satisfies Record<string, DynamicShapeStyle>;
 
 export const Colors = {
-  ok: "systemGreen" as const,
-  warn: "systemOrange" as const,
-  bad: "systemRed" as const,
-  ok5h: "systemBlue" as const,
-};
+  ok: { light: "#3E9A48", dark: "#7DCE78" },
+  warn: { light: "#C56A12", dark: "#E08A2E" },
+  bad: { light: "#C04040", dark: "#E07070" },
+  ok5h: { light: "#0284C7", dark: "#38BDF8" },
+} satisfies Record<string, DynamicShapeStyle>;
 
-export function ok(): AccentColor {
-  return Colors.ok;
-}
-
-export function warn(): AccentColor {
-  return Colors.warn;
-}
-
-export function bad(): AccentColor {
-  return Colors.bad;
-}
-
-export function ok5h(): AccentColor {
-  return Colors.ok5h;
-}
-
-export function accentFor(remainingPct: number | null): AccentColor {
-  if (remainingPct == null) return "secondaryLabel";
+export function accentFor(remainingPct: number | null): DynamicShapeStyle {
+  if (remainingPct == null) return UI.faint;
   if (remainingPct <= 8) return Colors.bad;
   if (remainingPct <= 22) return Colors.warn;
   return Colors.ok;
 }
 
-export function accentFor5h(remainingPct: number | null): AccentColor {
-  if (remainingPct == null) return "secondaryLabel";
+export function accentFor5h(remainingPct: number | null): DynamicShapeStyle {
+  if (remainingPct == null) return UI.faint;
   if (remainingPct <= 8) return Colors.bad;
   if (remainingPct <= 22) return Colors.warn;
   return Colors.ok5h;
