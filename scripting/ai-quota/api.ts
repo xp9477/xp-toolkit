@@ -33,15 +33,15 @@ export function serviceTapURL(id: string): string {
   return nativeAppURL(id);
 }
 
-function getWidget(): any {
+export function getWidget(): any {
   return typeof Widget !== "undefined" ? Widget : (globalThis as any).Widget;
 }
 
-function getKeychain(): any {
+export function getKeychain(): any {
   return typeof Keychain !== "undefined" ? Keychain : (globalThis as any).Keychain;
 }
 
-function getStorage(): any {
+export function getStorage(): any {
   return typeof Storage !== "undefined" ? Storage : (globalThis as any).Storage;
 }
 

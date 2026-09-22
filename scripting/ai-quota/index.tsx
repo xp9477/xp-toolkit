@@ -9,16 +9,22 @@ import {
   Button,
   Text,
   VStack,
-  HStack,
-  Spacer,
   Navigation,
   Script,
   Widget,
-  Keychain,
-  Storage,
 } from "scripting";
-import { fetchQuotaData, normalizeCpaBaseUrl, KEY, pctLabel } from "./api";
+import {
+  fetchQuotaData,
+  normalizeCpaBaseUrl,
+  KEY,
+  pctLabel,
+  getKeychain,
+  getStorage,
+} from "./api";
 import { UI } from "./theme";
+
+declare const Keychain: any;
+declare const Storage: any;
 
 function ConfigApp() {
   const [baseUrl, setBaseUrl] = useState("");
@@ -29,8 +35,16 @@ function ConfigApp() {
 
   useEffect(() => {
     try {
-      const storedBase = Keychain.get(KEY.cpaBase) || Storage.get(KEY.cpaBase) || "";
-      const storedKey = Keychain.get(KEY.cpaKey) || Storage.get(KEY.cpaKey) || "";
+      const kc = getKeychain();
+      const st = getStorage();
+      const storedBase =
+        (kc?.get?.(KEY.cpaBase) ?? "") ||
+        (st?.get?.(KEY.cpaBase) ?? "") ||
+        "";
+      const storedKey =
+        (kc?.get?.(KEY.cpaKey) ?? "") ||
+        (st?.get?.(KEY.cpaKey) ?? "") ||
+        "";
       if (storedBase) setBaseUrl(storedBase);
       if (storedKey) setApiKey(storedKey);
     } catch (_) {}
@@ -40,10 +54,31 @@ function ConfigApp() {
     try {
       const cleanUrl = normalizeCpaBaseUrl(baseUrl);
       const cleanKey = apiKey.trim();
-      Keychain.set(KEY.cpaBase, cleanUrl);
-      Keychain.set(KEY.cpaKey, cleanKey);
-      Storage.set(KEY.cpaBase, cleanUrl);
-      Storage.set(KEY.cpaKey, cleanKey);
+      const kc = getKeychain();
+      const st = getStorage();
+      let saved = false;
+      if (kc?.set) {
+        kc.set(KEY.cpaBase, cleanUrl);
+        kc.set(KEY.cpaKey, cleanKey);
+        saved = true;
+      }
+      if (st?.set) {
+        st.set(KEY.cpaBase, cleanUrl);
+        st.set(KEY.cpaKey, cleanKey);
+        saved = true;
+      }
+      if (!saved) {
+        // Fallback to direct globals if available
+        if (typeof Keychain !== "undefined" && Keychain.set) {
+          Keychain.set(KEY.cpaBase, cleanUrl);
+          Keychain.set(KEY.cpaKey, cleanKey);
+          saved = true;
+        } else if (typeof Storage !== "undefined" && Storage.set) {
+          Storage.set(KEY.cpaBase, cleanUrl);
+          Storage.set(KEY.cpaKey, cleanKey);
+          saved = true;
+        }
+      }
       setStatus("配置已成功保存到 Keychain 与 Storage");
       return true;
     } catch (e: any) {
