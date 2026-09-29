@@ -15,7 +15,7 @@ import {
 } from "scripting";
 import type { QuotaData, ServiceQuota, ServiceAccountDetail } from "./types";
 import { UI, accentFor, accentFor5h, shortenHint, type DynamicShapeStyle } from "./theme";
-import { fetchQuotaData, pctLabel } from "./api";
+import { fetchQuotaData, isRefreshing, pctLabel } from "./api";
 import { ReloadQuotaIntent } from "./app_intents";
 
 function ProgressBar({
@@ -49,6 +49,27 @@ function ProgressBar({
         }}
       </GeometryReader>
     </VStack>
+  );
+}
+
+function RefreshButton({ spinning }: { spinning: boolean }) {
+  return (
+    <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
+      {spinning ? (
+        <Image
+          systemName="arrow.clockwise"
+          imageScale="small"
+          foregroundStyle={UI.muted}
+          clockHandRotationEffect="secondHand"
+        />
+      ) : (
+        <Image
+          systemName="arrow.clockwise"
+          imageScale="small"
+          foregroundStyle={UI.muted}
+        />
+      )}
+    </Button>
   );
 }
 
@@ -236,6 +257,7 @@ function AccountRow({
 
 export function QuotaWidget({ data }: { data: QuotaData }) {
   const f = Widget.family;
+  const spinning = isRefreshing();
 
   if (f === "accessoryInline") {
     return (
@@ -306,13 +328,7 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
             {refreshClock(data.fetchedAt)}
           </Text>
           <Spacer />
-          <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
-            <Image
-              systemName="arrow.clockwise"
-              imageScale="small"
-              foregroundStyle={UI.muted}
-            />
-          </Button>
+          <RefreshButton spinning={spinning} />
         </HStack>
 
         <SmallServiceRow service={data.grok} />
@@ -358,13 +374,7 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
             />
           </HStack>
           <Spacer />
-          <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
-            <Image
-              systemName="arrow.clockwise"
-              imageScale="small"
-              foregroundStyle={UI.muted}
-            />
-          </Button>
+          <RefreshButton spinning={spinning} />
         </HStack>
 
         {/* 3 Main Columns */}
@@ -419,13 +429,7 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
           />
         </HStack>
         <Spacer />
-        <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
-          <Image
-            systemName="arrow.clockwise"
-            imageScale="small"
-            foregroundStyle={UI.muted}
-          />
-        </Button>
+        <RefreshButton spinning={spinning} />
       </HStack>
 
       <HStack spacing={12} alignment="top">

@@ -15,6 +15,7 @@ export const KEY = {
 };
 
 export const CACHE_KEY = "ai-quota-cache";
+export const REFRESHING_KEY = "ai-quota-refreshing";
 export const CACHE_TTL_MS = 10 * 60 * 1000;
 export const UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
@@ -97,6 +98,20 @@ export function saveCredentials(baseUrl: string, apiKey: string): boolean {
     keychain?.set?.(KEY.cpaKey, cleanKey);
   } catch (_) {}
   return Boolean(saved);
+}
+
+export function isRefreshing(): boolean {
+  try {
+    return getStorage()?.get?.(REFRESHING_KEY) === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+export function setRefreshing(value: boolean): void {
+  try {
+    getStorage()?.set?.(REFRESHING_KEY, value);
+  } catch (_) {}
 }
 
 export function readConfig(overrideParam?: string): Config {
