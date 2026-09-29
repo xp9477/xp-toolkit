@@ -52,6 +52,16 @@ function ProgressBar({
   );
 }
 
+function ageLabel(iso: string): string {
+  const age = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(age) || age < 60_000) return "刚刚";
+  const mins = Math.floor(age / 60_000);
+  if (mins < 60) return `${mins}分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}小时前`;
+  return `${Math.floor(hours / 24)}天前`;
+}
+
 function FreshnessBadge({ isCached }: { isCached?: boolean }) {
   return (
     <HStack spacing={3} alignment="center">
@@ -293,17 +303,11 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
         widgetBackground="systemBackground"
       >
         <HStack alignment="center">
-          <Text font={11} fontWeight="bold" foregroundStyle={UI.ink}>
-            AI Quota
+          <FreshnessBadge isCached={data.isCached} />
+          <Text font={9} foregroundStyle={UI.muted}>
+            {ageLabel(data.fetchedAt)}
           </Text>
           <Spacer />
-          <FreshnessBadge isCached={data.isCached} />
-          <DateLabel
-            date={new Date(data.fetchedAt)}
-            style="relative"
-            font={8}
-            foregroundStyle={UI.muted}
-          />
           <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
             <Image
               systemName="arrow.clockwise"
