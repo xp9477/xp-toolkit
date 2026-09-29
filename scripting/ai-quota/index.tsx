@@ -15,11 +15,9 @@ import {
 } from "scripting";
 import {
   fetchQuotaData,
-  normalizeCpaBaseUrl,
-  KEY,
   pctLabel,
-  getKeychain,
-  getStorage,
+  loadCredentials,
+  saveCredentials,
 } from "./api";
 import { UI } from "./theme";
 
@@ -32,30 +30,15 @@ function ConfigApp() {
 
   useEffect(() => {
     try {
-      // https://scriptingapp.github.io/guide/Device%20Capabilities/Keychain
-      // https://scriptingapp.github.io/guide/Utilities/Storage
-      const keychain = getKeychain();
-      const storage = getStorage();
-      const storedBase = keychain?.get(KEY.cpaBase) || storage?.get(KEY.cpaBase) || "";
-      const storedKey = keychain?.get(KEY.cpaKey) || storage?.get(KEY.cpaKey) || "";
-      if (storedBase) setBaseUrl(storedBase);
-      if (storedKey) setApiKey(storedKey);
+      const stored = loadCredentials();
+      if (stored.cpaBaseUrl) setBaseUrl(stored.cpaBaseUrl);
+      if (stored.cpaApiKey) setApiKey(stored.cpaApiKey);
     } catch (_) {}
   }, []);
 
   const saveConfig = () => {
     try {
-      const cleanUrl = normalizeCpaBaseUrl(baseUrl);
-      const cleanKey = apiKey.trim();
-      const keychain = getKeychain();
-      const storage = getStorage();
-      if (!keychain?.set || !storage?.set) {
-        setStatus("当前环境没有 Keychain / Storage");
-        return false;
-      }
-      const keyOk = keychain.set(KEY.cpaBase, cleanUrl) && keychain.set(KEY.cpaKey, cleanKey);
-      const storeOk = storage.set(KEY.cpaBase, cleanUrl) && storage.set(KEY.cpaKey, cleanKey);
-      if (!keyOk || !storeOk) {
+      if (!saveCredentials(baseUrl, apiKey)) {
         setStatus("保存失败");
         return false;
       }
@@ -105,7 +88,7 @@ function ConfigApp() {
       <List navigationTitle="AI Quota 设置">
         <Section
           header={<Text>CPA 管理端连接</Text>}
-          footer={<Text>SuperGrok、ChatGPT 与 Google 认证均从 CLI Proxy API (CPA) 获取，安全保存在系统 Keychain 中。</Text>}
+          footer={<Text>地址和 API Key 保存在共享 Storage，覆盖导入后仍可读取。同一台设备上的其他 Scripting 脚本也能读到这把 Key。</Text>}
         >
           <TextField
             title="CPA Base URL"

@@ -56,6 +56,49 @@ export function getStorage(): any {
 }
 
 // ---------- Config ----------
+const SHARED = { shared: true };
+
+function storedValue(storage: any, keychain: any, key: string): string {
+  try {
+    const shared = storage?.get?.(key, SHARED);
+    if (shared) return String(shared);
+  } catch (_) {}
+  try {
+    const chained = keychain?.get?.(key);
+    if (chained) return String(chained);
+  } catch (_) {}
+  try {
+    const local = storage?.get?.(key);
+    if (local) return String(local);
+  } catch (_) {}
+  return "";
+}
+
+export function loadCredentials(): { cpaBaseUrl: string; cpaApiKey: string } {
+  const storage = getStorage();
+  const keychain = getKeychain();
+  return {
+    cpaBaseUrl: storedValue(storage, keychain, KEY.cpaBase),
+    cpaApiKey: storedValue(storage, keychain, KEY.cpaKey),
+  };
+}
+
+export function saveCredentials(baseUrl: string, apiKey: string): boolean {
+  const cleanUrl = normalizeCpaBaseUrl(baseUrl);
+  const cleanKey = apiKey.trim();
+  const storage = getStorage();
+  if (!storage?.set) return false;
+  const saved =
+    storage.set(KEY.cpaBase, cleanUrl, SHARED) &&
+    storage.set(KEY.cpaKey, cleanKey, SHARED);
+  try {
+    const keychain = getKeychain();
+    keychain?.set?.(KEY.cpaBase, cleanUrl);
+    keychain?.set?.(KEY.cpaKey, cleanKey);
+  } catch (_) {}
+  return Boolean(saved);
+}
+
 export function readConfig(overrideParam?: string): Config {
   const cfg: Config = {
     cpaBaseUrl: "",
@@ -80,27 +123,8 @@ export function readConfig(overrideParam?: string): Config {
     }
   }
 
-  if (!cfg.cpaBaseUrl && keychain?.get) {
-    try {
-      cfg.cpaBaseUrl = keychain.get(KEY.cpaBase) || "";
-    } catch (_) {}
-  }
-  if (!cfg.cpaApiKey && keychain?.get) {
-    try {
-      cfg.cpaApiKey = keychain.get(KEY.cpaKey) || "";
-    } catch (_) {}
-  }
-
-  if (!cfg.cpaBaseUrl && storage?.get) {
-    try {
-      cfg.cpaBaseUrl = storage.get(KEY.cpaBase) || "";
-    } catch (_) {}
-  }
-  if (!cfg.cpaApiKey && storage?.get) {
-    try {
-      cfg.cpaApiKey = storage.get(KEY.cpaKey) || "";
-    } catch (_) {}
-  }
+  if (!cfg.cpaBaseUrl) cfg.cpaBaseUrl = storedValue(storage, keychain, KEY.cpaBase);
+  if (!cfg.cpaApiKey) cfg.cpaApiKey = storedValue(storage, keychain, KEY.cpaKey);
 
   try {
     cfg.cpaBaseUrl = normalizeCpaBaseUrl(cfg.cpaBaseUrl);

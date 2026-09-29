@@ -43,7 +43,7 @@ scripting/ai-quota/
   在 Scripting App 内打开并运行 `index.tsx`：
   - 输入 CPA 管理端地址（如 `https://cpa.example:50442` 或 `http://192.168.1.10:50442`）
   - 输入 CPA 管理端 API Key
-  - 点击“保存配置”，凭据将安全存入 iOS 系统 Keychain 及本地 Storage
+  - 点击“保存配置”。地址和 API Key 写入共享 Storage，覆盖导入后仍然保留
   - 点击“测试连接并拉取配额”验证网络与数据
   - 点击“预览小组件”查看各尺寸渲染效果
 - **方式二：小组件参数 JSON（降级备选）**
@@ -60,4 +60,4 @@ scripting/ai-quota/
 
 - **严禁提交真实密钥**：不要将真实的 Token、Cookie 或 CPA 管理 Key 提交进 Git 仓库。
 - **地址白名单与校验**：CPA 地址经 `normalizeCpaBaseUrl` 严格校验，仅允许纯主机与端口地址，拒绝 userinfo、路径、查询与片段，防止密钥被意外转发。
-- **Keychain 沙盒隔离**：凭据默认采用 iOS Keychain 安全存储，脚本卸载后系统自动回收。
+- **共享凭据**：CPA 地址和 API Key 存在共享 Storage。覆盖导入不会丢失；同一台设备上的其他 Scripting 脚本可以读取。
