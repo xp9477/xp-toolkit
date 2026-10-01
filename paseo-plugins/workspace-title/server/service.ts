@@ -173,7 +173,14 @@ export class WorkspaceTitleService {
       "/home/parker/.npm-global/lib/node_modules/@getpaseo/cli/node_modules/@getpaseo/client/dist/index.js"
     );
 
-    this.daemonClient = await connectToDaemon();
+    // The CLI client requires an explicit target; without it, the error path
+    // dereferences options.target.kind and floods the daemon log on every sweep.
+    this.daemonClient = await connectToDaemon({
+      target: {
+        kind: "instance",
+        home: process.env.PASEO_HOME || path.join(os.homedir(), ".paseo"),
+      },
+    });
     this.paseo = createPaseoApi(this.daemonClient);
 
     // Subscribe to workspace updates to detect user manual title edits or changes
