@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "settings": {
+    "output_file": "captures/records.enc",
+    "default_max_value_bytes": 1024,
+    "default_max_record_bytes": 16384,
+    "log_level": "INFO"
+  },
+  "projects": [
+    {
+      "id": "yanxuan",
+      "name": "网易严选每日签到",
+      "enabled": false,
+      "description": "网易严选签到活动必要凭据捕获示例（默认禁用，确认授权并配置密钥后再启用）",
+      "domains": [
+        "act.you.163.com"
+      ],
+      "paths": [
+        "/act-attendance/task/list",
+        "/act-attendance/att/v4/index",
+        "/act-attendance/att/v3/sign"
+      ],
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "capture_headers": [
+        "User-Agent",
+        "X-Requested-With"
+      ],
+      "capture_cookies": [
+        "yx_csrf",
+        "yx_new_sid",
+        "yx_sid",
+        "NTES_YD_SESS"
+      ],
+      "max_value_bytes": 1024,
+      "max_record_bytes": 8192
+    }
+  ]
+}
