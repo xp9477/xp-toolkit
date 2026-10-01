@@ -1,0 +1,11 @@
+{
+  "sources": [
+    {
+      "id": "yanxuan_daily_sign",
+      "name": "网易严选每日签到",
+      "url": "https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/yanxuan_daily_sign.js",
+      "enabled": false,
+      "note": "示例配置（默认禁用）。使用前请在青龙环境变量 upstream_change_monitor 中配置并设 enabled:true，首次拉取后需人工核对 SHA256 并显式批准"
+    }
+  ]
+}
