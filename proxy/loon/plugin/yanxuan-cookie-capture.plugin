@@ -1,0 +1,10 @@
+#!name=网易严选签到Cookie本地抓取
+#!desc=仅在访问网易严选活动签到指定页面时本地安全抓取必要凭据，保存至Loon持久化存储，供手动配置青龙环境变量 yanxuan_daily_sign。严格限制域名路径与白名单字段，绝不修改请求且无网络外发。
+#!homepage=https://github.com/xp9477/xp-toolkit
+#!author=xp9477
+
+[Script]
+request if ${url} ~= /^https:\/\/act\.you\.163\.com\/act-attendance\/(?:task\/list|att\/v4\/index|att\/v3\/sign)(?:[?#]|$)/ then script("https://raw.githubusercontent.com/xp9477/xp-toolkit/main/proxy/loon/script/yanxuan-cookie-capture.js") with tag="严选Cookie抓取", timeout=10
+
+[MITM]
+hostname = act.you.163.com
