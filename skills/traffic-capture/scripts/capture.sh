@@ -33,7 +33,7 @@ set -eu
 umask 077
 AUTH=$(cat /conf/proxy-auth)
 FILE=$(cat /data/current-session)
-exec mitmdump --mode regular@192.168.0.20:8898 --mode regular@100.113.76.65:8898 --set confdir=/conf --set flow_detail=0 --proxyauth "$AUTH" -q -w "/data/$FILE"
+exec mitmdump --mode regular@0.0.0.0:8898 --set confdir=/conf --set flow_detail=0 --proxyauth "$AUTH" -q -w "/data/$FILE"
 RUN
     chmod 700 "$BASE/conf/run.sh"
     docker run -d --name xp-capture-proxy --network host --restart no --memory 256m \
