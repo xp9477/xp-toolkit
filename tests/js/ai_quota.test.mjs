@@ -161,6 +161,74 @@ test("remaining percent averages across accounts without counting them", () => {
   assert.equal(single.extra, "");
 });
 
+function installHost(entries = {}) {
+  const box = { ...entries };
+  globalThis.Storage = {
+    get(key) {
+      return Object.prototype.hasOwnProperty.call(box, key) ? box[key] : null;
+    },
+    set(key, value) {
+      box[key] = value;
+      return true;
+    },
+    remove(key) {
+      delete box[key];
+    },
+  };
+  globalThis.Keychain = { get() { return null; }, set() {} };
+  globalThis.Widget = { parameter: "" };
+  return box;
+}
+
+test("refresh flag expires so a crashed reload cannot stick", () => {
+  installHost();
+  assert.equal(api.isRefreshing(), false);
+  api.setRefreshing(true);
+  assert.equal(api.isRefreshing(), true);
+  api.setRefreshing(false);
+  assert.equal(api.isRefreshing(), false);
+  assert.equal(api.isRefreshing(Date.now()), false);
+
+  const started = Date.now() - api.REFRESHING_TTL_MS - 1000;
+  installHost({ [api.REFRESHING_KEY]: started });
+  assert.equal(api.isRefreshing(), false);
+  assert.equal(api.isRefreshing(started + 1000), true);
+});
+
+test("cached quota can be shown without a network fetch, even after the TTL", () => {
+  const cfg = { cpaBaseUrl: "https://cpa.example", cpaApiKey: "secret" };
+  const fetchedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  installHost({
+    [api.KEY.cpaBase]: cfg.cpaBaseUrl,
+    [api.KEY.cpaKey]: cfg.cpaApiKey,
+    [api.CACHE_KEY]: {
+      scope: api.cacheScope(cfg),
+      savedAt: fetchedAt,
+      data: {
+        fetchedAt,
+        grok: { remainingPct: 40 },
+        chatgpt: { remainingPct: 50 },
+        gemini: { remainingPct: 60 },
+      },
+    },
+  });
+  const cached = api.readCachedQuota();
+  assert.equal(cached.isCached, true);
+  assert.equal(cached.fetchedAt, fetchedAt);
+  assert.equal(cached.grok.remainingPct, 40);
+
+  installHost({
+    [api.KEY.cpaBase]: cfg.cpaBaseUrl,
+    [api.KEY.cpaKey]: cfg.cpaApiKey,
+    [api.CACHE_KEY]: {
+      scope: "other",
+      savedAt: fetchedAt,
+      data: { fetchedAt, grok: {}, chatgpt: {}, gemini: {} },
+    },
+  });
+  assert.equal(api.readCachedQuota(), null);
+});
+
 test("service tap URLs directly target native app schemes", () => {
   assert.equal(api.serviceTapURL("grok"), "grok://");
   assert.equal(api.serviceTapURL("chatgpt"), "com.openai.chat://");

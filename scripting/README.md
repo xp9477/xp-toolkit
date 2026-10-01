@@ -11,4 +11,4 @@ iOS [Scripting](https://scripting.fun) 原生 TypeScript / TSX 项目集合。
 
 ## 项目列表
 
-- [ai-quota](./ai-quota/): AI 配额监控小组件，支持 SuperGrok、ChatGPT 与 Google Gemini 配额监控、原地刷新与官方 App 快速直达。
+- [ai-quota](./ai-quota/): AI 配额监控小组件，支持 SuperGrok、ChatGPT 与 Google Gemini 配额监控，点击桌面卡片原地刷新。

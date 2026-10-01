@@ -100,9 +100,14 @@ export function saveCredentials(baseUrl: string, apiKey: string): boolean {
   return Boolean(saved);
 }
 
-export function isRefreshing(): boolean {
+// A crashed refresh must not leave the widget stuck on "正在刷新".
+export const REFRESHING_TTL_MS = 45_000;
+
+export function isRefreshing(now = Date.now()): boolean {
   try {
-    return getStorage()?.get?.(REFRESHING_KEY) === true;
+    const raw = getStorage()?.get?.(REFRESHING_KEY);
+    if (typeof raw !== "number" || raw <= 0) return false;
+    return now - raw < REFRESHING_TTL_MS;
   } catch (_) {
     return false;
   }
@@ -110,7 +115,14 @@ export function isRefreshing(): boolean {
 
 export function setRefreshing(value: boolean): void {
   try {
-    getStorage()?.set?.(REFRESHING_KEY, value);
+    const storage = getStorage();
+    if (!storage) return;
+    if (value) {
+      storage.set?.(REFRESHING_KEY, Date.now());
+      return;
+    }
+    if (storage.remove) storage.remove(REFRESHING_KEY);
+    else storage.set?.(REFRESHING_KEY, 0);
   } catch (_) {}
 }
 
@@ -854,6 +866,29 @@ export function mergeCachedService(
   return fresh[id];
 }
 
+function loadScopedCache(scope: string): CachePayload | null {
+  const storage = getStorage();
+  if (!storage?.get) return null;
+  try {
+    const raw = storage.get(CACHE_KEY);
+    if (!raw) return null;
+    const payload: CachePayload = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!payload || payload.scope !== scope || !payload.data?.fetchedAt) return null;
+    return payload;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Last snapshot, including an expired one. The refreshing frame must not hit the network.
+export function readCachedQuota(): QuotaData | null {
+  const cfg = readConfig();
+  if (!hasAnyAuth(cfg)) return null;
+  const cached = loadScopedCache(cacheScope(cfg));
+  if (!cached) return null;
+  return { ...cached.data, isCached: true };
+}
+
 export async function fetchQuotaData(forceRefresh = false): Promise<QuotaData> {
   const cfg = readConfig();
   if (!hasAnyAuth(cfg)) {
@@ -869,17 +904,7 @@ export async function fetchQuotaData(forceRefresh = false): Promise<QuotaData> {
 
   const scope = cacheScope(cfg);
   const storage = getStorage();
-  let cachedPayload: CachePayload | null = null;
-  if (storage?.get) {
-    try {
-      const raw = storage.get(CACHE_KEY);
-      if (raw) {
-        cachedPayload = typeof raw === "string" ? JSON.parse(raw) : raw;
-      }
-    } catch (_) {}
-  }
-
-  const cached = cachedPayload?.scope === scope ? cachedPayload : null;
+  const cached = loadScopedCache(scope);
   const now = Date.now();
   if (!forceRefresh && cached?.data?.fetchedAt) {
     const age = now - new Date(cached.data.fetchedAt).getTime();

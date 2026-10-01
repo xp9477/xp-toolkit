@@ -4,8 +4,6 @@ import {
   HStack,
   ZStack,
   Text,
-  Image,
-  Link,
   Button,
   Capsule,
   Spacer,
@@ -15,7 +13,7 @@ import {
 } from "scripting";
 import type { QuotaData, ServiceQuota, ServiceAccountDetail } from "./types";
 import { UI, accentFor, accentFor5h, shortenHint, type DynamicShapeStyle } from "./theme";
-import { fetchQuotaData, isRefreshing, pctLabel } from "./api";
+import { fetchQuotaData, isRefreshing, pctLabel, readCachedQuota } from "./api";
 import { ReloadQuotaIntent } from "./app_intents";
 
 function ProgressBar({
@@ -52,24 +50,43 @@ function ProgressBar({
   );
 }
 
-function RefreshButton({ spinning }: { spinning: boolean }) {
+function TapToRefresh({ children }: { children: any }) {
   return (
     <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
-      {spinning ? (
-        <Image
-          systemName="arrow.clockwise"
-          imageScale="small"
-          foregroundStyle={UI.muted}
-          clockHandRotationEffect="secondHand"
-        />
+      {children}
+    </Button>
+  );
+}
+
+function homeFamily(): boolean {
+  const f = Widget.family;
+  return f === "systemSmall" || f === "systemMedium" || f === "systemLarge";
+}
+
+function StatusTrail({ data, refreshing, clock }: { data: QuotaData; refreshing: boolean; clock?: boolean }) {
+  if (refreshing) {
+    return (
+      <Text font={10} fontWeight="semibold" foregroundStyle={UI.muted}>
+        正在刷新
+      </Text>
+    );
+  }
+  return (
+    <HStack spacing={6} alignment="center">
+      <FreshnessBadge isCached={data.isCached} />
+      {clock ? (
+        <Text font={9} monospacedDigit foregroundStyle={UI.muted}>
+          {refreshClock(data.fetchedAt)}
+        </Text>
       ) : (
-        <Image
-          systemName="arrow.clockwise"
-          imageScale="small"
+        <DateLabel
+          date={new Date(data.fetchedAt)}
+          style="relative"
+          font={10}
           foregroundStyle={UI.muted}
         />
       )}
-    </Button>
+    </HStack>
   );
 }
 
@@ -106,8 +123,7 @@ function ServiceColumn({ service }: { service: ServiceQuota }) {
   const resetText = service.resetHint ? shortenHint(service.resetHint) : service.windowLabel;
 
   return (
-    <Link url={service.url}>
-      <VStack alignment="leading" spacing={4}>
+    <VStack alignment="leading" spacing={4}>
         <HStack alignment="center">
           <Text font={12} fontWeight="semibold" foregroundStyle={UI.ink}>
             {service.name}
@@ -177,16 +193,14 @@ function ServiceColumn({ service }: { service: ServiceQuota }) {
             />
           </VStack>
         ) : null}
-      </VStack>
-    </Link>
+    </VStack>
   );
 }
 
 function SmallServiceRow({ service }: { service: ServiceQuota }) {
   const resetText = service.resetHint ? shortenHint(service.resetHint) : service.windowLabel;
   return (
-    <Link url={service.url}>
-      <VStack alignment="leading" spacing={2}>
+    <VStack alignment="leading" spacing={2}>
         <HStack alignment="center">
           <Text font={11} fontWeight="semibold" foregroundStyle={UI.ink}>
             {service.name}
@@ -217,8 +231,7 @@ function SmallServiceRow({ service }: { service: ServiceQuota }) {
             </Text>
           ) : null}
         </HStack>
-      </VStack>
-    </Link>
+    </VStack>
   );
 }
 
@@ -260,6 +273,7 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
   const spinning = isRefreshing();
 
   if (f === "accessoryInline") {
+    if (spinning) return <Text font={10}>正在刷新</Text>;
     return (
       <Text font={10}>
         Grok:{pctLabel(data.grok.remainingPct)}% · GPT:{pctLabel(data.chatgpt.remainingPct)}% · Gem:{pctLabel(data.gemini.remainingPct)}%
@@ -275,12 +289,18 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
             AI Quota
           </Text>
           <Spacer />
-          <DateLabel
-            date={new Date(data.fetchedAt)}
-            style="relative"
-            font={8}
-            foregroundStyle={UI.muted}
-          />
+          {spinning ? (
+            <Text font={8} fontWeight="semibold" foregroundStyle={UI.muted}>
+              正在刷新
+            </Text>
+          ) : (
+            <DateLabel
+              date={new Date(data.fetchedAt)}
+              style="relative"
+              font={8}
+              foregroundStyle={UI.muted}
+            />
+          )}
         </HStack>
         <HStack spacing={8} alignment="center">
           <VStack alignment="center" spacing={1}>
@@ -316,27 +336,25 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
 
   if (f === "systemSmall") {
     return (
-      <VStack
-        alignment="leading"
-        spacing={6}
-        padding={12}
-        widgetBackground="systemBackground"
-      >
-        <HStack alignment="center">
-          <FreshnessBadge isCached={data.isCached} />
-          <Text font={9} monospacedDigit foregroundStyle={UI.muted}>
-            {refreshClock(data.fetchedAt)}
-          </Text>
-          <Spacer />
-          <RefreshButton spinning={spinning} />
-        </HStack>
+      <TapToRefresh>
+        <VStack
+          alignment="leading"
+          spacing={6}
+          padding={12}
+          widgetBackground="systemBackground"
+        >
+          <HStack alignment="center">
+            <StatusTrail data={data} refreshing={spinning} clock />
+            <Spacer />
+          </HStack>
 
-        <SmallServiceRow service={data.grok} />
-        <Divider />
-        <SmallServiceRow service={data.chatgpt} />
-        <Divider />
-        <SmallServiceRow service={data.gemini} />
-      </VStack>
+          <SmallServiceRow service={data.grok} />
+          <Divider />
+          <SmallServiceRow service={data.chatgpt} />
+          <Divider />
+          <SmallServiceRow service={data.gemini} />
+        </VStack>
+      </TapToRefresh>
     );
   }
 
@@ -353,31 +371,71 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
     }
 
     return (
+      <TapToRefresh>
+        <VStack
+          alignment="leading"
+          spacing={10}
+          padding={16}
+          widgetBackground="systemBackground"
+        >
+          <HStack alignment="center">
+            <HStack spacing={6} alignment="center">
+              <Text font={14} fontWeight="bold" foregroundStyle={UI.ink}>
+                AI Quota
+              </Text>
+              <StatusTrail data={data} refreshing={spinning} />
+            </HStack>
+            <Spacer />
+          </HStack>
+
+          <HStack spacing={12} alignment="top">
+            <ServiceColumn service={data.grok} />
+            <Divider />
+            <ServiceColumn service={data.chatgpt} />
+            <Divider />
+            <ServiceColumn service={data.gemini} />
+          </HStack>
+
+          <Divider />
+
+          <VStack alignment="leading" spacing={4}>
+            <Text font={11} fontWeight="semibold" foregroundStyle={UI.muted}>
+              多账号明细
+            </Text>
+            {allDetails.length > 0 ? (
+              allDetails.slice(0, 5).map((item, idx) => (
+                <AccountRow key={idx} detail={item.detail} serviceName={item.serviceName} />
+              ))
+            ) : (
+              <Text font={10} foregroundStyle={UI.faint}>
+                暂无更多子账号数据
+              </Text>
+            )}
+          </VStack>
+        </VStack>
+      </TapToRefresh>
+    );
+  }
+
+  // Default: systemMedium
+  return (
+    <TapToRefresh>
       <VStack
         alignment="leading"
-        spacing={10}
-        padding={16}
+        spacing={8}
+        padding={14}
         widgetBackground="systemBackground"
       >
-        {/* Top bar */}
         <HStack alignment="center">
           <HStack spacing={6} alignment="center">
-            <Text font={14} fontWeight="bold" foregroundStyle={UI.ink}>
+            <Text font={13} fontWeight="bold" foregroundStyle={UI.ink}>
               AI Quota
             </Text>
-            <FreshnessBadge isCached={data.isCached} />
-            <DateLabel
-              date={new Date(data.fetchedAt)}
-              style="relative"
-              font={10}
-              foregroundStyle={UI.muted}
-            />
+            <StatusTrail data={data} refreshing={spinning} />
           </HStack>
           <Spacer />
-          <RefreshButton spinning={spinning} />
         </HStack>
 
-        {/* 3 Main Columns */}
         <HStack spacing={12} alignment="top">
           <ServiceColumn service={data.grok} />
           <Divider />
@@ -385,74 +443,48 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
           <Divider />
           <ServiceColumn service={data.gemini} />
         </HStack>
-
-        <Divider />
-
-        {/* Detailed accounts */}
-        <VStack alignment="leading" spacing={4}>
-          <Text font={11} fontWeight="semibold" foregroundStyle={UI.muted}>
-            多账号明细
-          </Text>
-          {allDetails.length > 0 ? (
-            allDetails.slice(0, 5).map((item, idx) => (
-              <AccountRow key={idx} detail={item.detail} serviceName={item.serviceName} />
-            ))
-          ) : (
-            <Text font={10} foregroundStyle={UI.faint}>
-              暂无更多子账号数据
-            </Text>
-          )}
-        </VStack>
       </VStack>
-    );
-  }
-
-  // Default: systemMedium
-  return (
-    <VStack
-      alignment="leading"
-      spacing={8}
-      padding={14}
-      widgetBackground="systemBackground"
-    >
-      <HStack alignment="center">
-        <HStack spacing={6} alignment="center">
-          <Text font={13} fontWeight="bold" foregroundStyle={UI.ink}>
-            AI Quota
-          </Text>
-          <FreshnessBadge isCached={data.isCached} />
-          <DateLabel
-            date={new Date(data.fetchedAt)}
-            style="relative"
-            font={10}
-            foregroundStyle={UI.muted}
-          />
-        </HStack>
-        <Spacer />
-        <RefreshButton spinning={spinning} />
-      </HStack>
-
-      <HStack spacing={12} alignment="top">
-        <ServiceColumn service={data.grok} />
-        <Divider />
-        <ServiceColumn service={data.chatgpt} />
-        <Divider />
-        <ServiceColumn service={data.gemini} />
-      </HStack>
-    </VStack>
+    </TapToRefresh>
   );
 }
 
-// Widget lifecycle
+function presentSnapshot(element: any, refreshing = false) {
+  Widget.present(element, {
+    policy: "after",
+    date: new Date(Date.now() + (refreshing ? 30 * 1000 : 15 * 60 * 1000)),
+  });
+}
+
+function refreshingPlaceholder() {
+  if (!homeFamily()) return <Text font={10}>正在刷新</Text>;
+  return (
+    <TapToRefresh>
+      <VStack alignment="center" spacing={4} padding={14} widgetBackground="systemBackground">
+        <Text font={12} fontWeight="semibold" foregroundStyle={UI.ink}>
+          正在刷新
+        </Text>
+      </VStack>
+    </TapToRefresh>
+  );
+}
+
+// Widget lifecycle. A refresh paints this entry twice: once with the flag set,
+// which must return immediately, then again after the intent has written the cache.
 (async () => {
   try {
+    if (isRefreshing()) {
+      const cached = readCachedQuota();
+      if (cached) {
+        presentSnapshot(<QuotaWidget data={cached} />, true);
+        return;
+      }
+      presentSnapshot(refreshingPlaceholder(), true);
+      return;
+    }
     const data = await fetchQuotaData();
-    Widget.present(<QuotaWidget data={data} />, {
-      policy: "after",
-      date: new Date(Date.now() + 15 * 60 * 1000),
-    });
+    presentSnapshot(<QuotaWidget data={data} />);
   } catch (e: any) {
-    Widget.present(
+    const failure = (
       <VStack alignment="center" spacing={4} padding={14} widgetBackground="systemBackground">
         <Text font={12} fontWeight="bold" foregroundStyle="systemRed">
           AI Quota 加载失败
@@ -462,5 +494,6 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
         </Text>
       </VStack>
     );
+    Widget.present(homeFamily() ? <TapToRefresh>{failure}</TapToRefresh> : failure);
   }
 })();
