@@ -2,10 +2,20 @@
   "sources": [
     {
       "id": "yanxuan_daily_sign",
+      "type": "script",
       "name": "网易严选每日签到",
       "url": "https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/yanxuan_daily_sign.js",
       "enabled": false,
-      "note": "示例配置（默认禁用）。使用前请在青龙环境变量 upstream_change_monitor 中配置并设 enabled:true，首次拉取后需人工核对 SHA256 并显式批准"
+      "note": "示例脚本监控配置（默认禁用）。使用前请在青龙环境变量 upstream_change_monitor 中配置并设 enabled:true"
+    },
+    {
+      "id": "yunding_app",
+      "type": "app_store",
+      "name": "云顶攻略助手",
+      "bundle_id": "cloud.miplus.tft",
+      "country": "cn",
+      "enabled": true,
+      "note": "iOS 云顶攻略助手 App Store 版本监控。新版本发布时将推送更新提醒与通用去广告 dylib 注入提示"
     }
   ]
 }

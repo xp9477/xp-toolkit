@@ -1,17 +1,26 @@
 """
-name: 上游第三方脚本变更监控
+name: 综合变更与更新监控
 cron: 0 */6 * * *
-description: 监控第三方上游脚本变更，安全隔离未审核代码并通过 Bark 提醒人工审计
+description: 统一监控第三方上游脚本与 App Store 应用版本更新，安全隔离未审核代码并推送 Bark 提醒
 
 env:
-- `upstream_change_monitor`: JSON 字符串或对象，配置待监控的上游源列表。
+- `upstream_change_monitor`: JSON 字符串或对象，配置待监控的源列表（支持脚本 URL 与 App Store 应用）。
   例如:
   {
     "sources": [
       {
         "id": "yanxuan_daily_sign",
+        "type": "script",
         "name": "网易严选每日签到",
         "url": "https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/yanxuan_daily_sign.js",
+        "enabled": true
+      },
+      {
+        "id": "yunding_app",
+        "type": "app_store",
+        "name": "云顶攻略助手",
+        "bundle_id": "cloud.miplus.tft",
+        "country": "cn",
         "enabled": true
       }
     ]
@@ -49,7 +58,7 @@ REQUEST_TIMEOUT = 15
 MAX_SNAPSHOT_SIZE = 5 * 1024 * 1024  # 单个脚本快照上限 5MB，防 DoS
 MAX_DIFF_LINES = 1000
 MAX_DIFF_CHARS = 100_000
-SOURCE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+SOURCE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,64}$")
 
 DEFAULT_ALLOWED_DOMAINS = {
     "raw.githubusercontent.com",
@@ -61,8 +70,12 @@ DEFAULT_ALLOWED_DOMAINS = {
 class UpstreamSource:
     id: str
     name: str
-    url: str
+    url: str = ""
     enabled: bool = True
+    type: str = "script"  # "script" | "app_store"
+    bundle_id: str = ""
+    app_id: str = ""
+    country: str = "cn"
 
 
 @dataclass
@@ -80,9 +93,9 @@ class ChangeResult:
 def validate_source_id(source_id: str) -> str:
     """校验 source_id，严防路径穿越与非法字符。"""
     raw = (source_id or "").strip()
-    if not SOURCE_ID_PATTERN.fullmatch(raw):
+    if not SOURCE_ID_PATTERN.fullmatch(raw) or ".." in raw or raw.startswith("."):
         raise ConfigError(
-            f"非法的 source_id [{raw}]: 仅允许 1-64 位英文字母、数字、下划线和连字符，严禁路径穿越字符"
+            f"非法的 source_id [{raw}]: 仅允许 1-64 位英文字母、数字、点号、下划线和连字符，严禁路径穿越字符"
         )
     return raw
 
@@ -273,20 +286,60 @@ def load_configured_sources() -> list[UpstreamSource]:
         raise ConfigError("上游配置必须为 JSON 对象或列表")
 
     sources: list[UpstreamSource] = []
+    # 额外兼容顶层 apps 配置
+    if isinstance(raw_cfg, dict) and "apps" in raw_cfg and isinstance(raw_cfg["apps"], list):
+        for app_item in raw_cfg["apps"]:
+            if isinstance(app_item, dict):
+                app_item["type"] = "app_store"
+                raw_list.append(app_item)
+
     for idx, item in enumerate(raw_list, 1):
         if not isinstance(item, dict):
             continue
+        source_type = str(item.get("type") or "").strip().lower()
         url = str(item.get("url") or "").strip()
-        if not url:
-            continue
-        validated_url = validate_upstream_url(url)
-        raw_id = str(item.get("id") or f"source_{idx}").strip()
-        source_id = validate_source_id(raw_id)
-        name = str(item.get("name") or source_id).strip()
-        enabled = bool(item.get("enabled", True))
-        sources.append(
-            UpstreamSource(id=source_id, name=name, url=validated_url, enabled=enabled)
-        )
+        bundle_id = str(item.get("bundle_id") or "").strip()
+        app_id = str(item.get("app_id") or "").strip()
+
+        # 判断是否为 App Store 监控源
+        if source_type in ("app_store", "app", "ios_app") or (bundle_id or app_id):
+            source_type = "app_store"
+            if not bundle_id and not app_id:
+                raise ConfigError("App Store 监控源必须提供 bundle_id 或 app_id")
+            raw_id = str(item.get("id") or bundle_id or app_id or f"app_{idx}").strip()
+            source_id = validate_source_id(raw_id)
+            name = str(item.get("name") or source_id).strip()
+            country = str(item.get("country") or "cn").strip()
+            enabled = bool(item.get("enabled", True))
+            sources.append(
+                UpstreamSource(
+                    id=source_id,
+                    name=name,
+                    type=source_type,
+                    bundle_id=bundle_id,
+                    app_id=app_id,
+                    country=country,
+                    enabled=enabled,
+                )
+            )
+        else:
+            source_type = "script"
+            if not url:
+                continue
+            validated_url = validate_upstream_url(url)
+            raw_id = str(item.get("id") or f"source_{idx}").strip()
+            source_id = validate_source_id(raw_id)
+            name = str(item.get("name") or source_id).strip()
+            enabled = bool(item.get("enabled", True))
+            sources.append(
+                UpstreamSource(
+                    id=source_id,
+                    name=name,
+                    type=source_type,
+                    url=validated_url,
+                    enabled=enabled,
+                )
+            )
 
     if not sources:
         raise ConfigError("未能解析到任何有效的上游监控源")
@@ -372,6 +425,175 @@ def format_change_notification(
     return title, body
 
 
+def check_app_store_source(
+    source: UpstreamSource,
+    state: dict[str, Any],
+    session: requests.Session | None = None,
+    notifier: Any = notify,
+) -> ChangeResult:
+    """
+    检查单个 App Store 应用版本更新：
+    1. 查询 Apple iTunes Lookup API (bundleId 或 appId)
+    2. 首次发现建立基线版本记录
+    3. 检测到版本更新时推送 Bark 通知并去重
+    """
+    validate_source_id(source.id)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    req = session or requests
+
+    if source.bundle_id:
+        param = f"bundleId={source.bundle_id}"
+    elif source.app_id:
+        param = f"id={source.app_id}"
+    else:
+        raise ConfigError(f"App Store 源 [{source.name}] 缺少 bundle_id 或 app_id")
+
+    url = f"https://itunes.apple.com/lookup?{param}&country={source.country}"
+    resp = req.get(
+        url,
+        headers={"User-Agent": "xp-toolkit-app-monitor/1.0"},
+        timeout=REQUEST_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"App Store 查询失败 (HTTP {resp.status_code}): {url}")
+
+    data = resp.json()
+    if not isinstance(data, dict) or data.get("resultCount", 0) == 0:
+        raise ValueError(f"App Store 未检索到应用信息 ({param})")
+
+    results = data.get("results", [])
+    if not results or not isinstance(results[0], dict):
+        raise ValueError(f"App Store 响应数据格式异常: {data}")
+
+    app_info = results[0]
+    latest_version = str(app_info.get("version", "")).strip()
+    track_name = str(app_info.get("trackName", source.name)).strip()
+    release_date = str(app_info.get("currentVersionReleaseDate", "")).strip()
+    release_notes = str(app_info.get("releaseNotes", "无更新日志")).strip()
+    track_view_url = str(app_info.get("trackViewUrl", "")).strip()
+
+    sources_state = state.setdefault("sources", {})
+    record = sources_state.get(source.id)
+
+    if not record:
+        sources_state[source.id] = {
+            "id": source.id,
+            "type": "app_store",
+            "name": source.name,
+            "track_name": track_name,
+            "bundle_id": source.bundle_id,
+            "app_id": source.app_id,
+            "status": "BASELINE_ESTABLISHED",
+            "version": latest_version,
+            "baseline_version": latest_version,
+            "latest_version": latest_version,
+            "last_notified_version": latest_version,
+            "last_checked_at": now_iso,
+            "last_changed_at": now_iso,
+            "release_date": release_date,
+            "track_url": track_view_url,
+        }
+        msg = f"首次监控建立基线版本 (v{latest_version})"
+        print(f"[基线建立] [{source.name}] {msg}")
+        return ChangeResult(
+            source_id=source.id,
+            source_name=source.name,
+            status="BASELINE_ESTABLISHED",
+            changed=False,
+            notified=False,
+            latest_hash=latest_version,
+            reviewed_hash=latest_version,
+            message=msg,
+        )
+
+    record["last_checked_at"] = now_iso
+    prev_version = str(record.get("version") or "").strip()
+    last_notified_version = str(record.get("last_notified_version") or "").strip()
+
+    if prev_version and latest_version == prev_version:
+        msg = f"应用版本无更新，当前版本: v{latest_version}"
+        print(f"[未变更] [{source.name}] {msg}")
+        return ChangeResult(
+            source_id=source.id,
+            source_name=source.name,
+            status="UNCHANGED",
+            changed=False,
+            notified=False,
+            latest_hash=latest_version,
+            reviewed_hash=prev_version,
+            message=msg,
+        )
+
+    record["status"] = "UPDATED"
+    record["latest_version"] = latest_version
+    record["last_changed_at"] = now_iso
+    record["release_date"] = release_date
+    record["release_notes"] = release_notes
+
+    if last_notified_version == latest_version:
+        msg = f"应用版本 (v{latest_version}) 变更此前已成功通知"
+        print(f"[已通知] [{source.name}] {msg}")
+        return ChangeResult(
+            source_id=source.id,
+            source_name=source.name,
+            status="PENDING_ALREADY_NOTIFIED",
+            changed=True,
+            notified=False,
+            latest_hash=latest_version,
+            reviewed_hash=prev_version,
+            message=msg,
+        )
+
+    title = f"【应用更新提醒】{source.name} 发布新版本 v{latest_version}"
+    body = (
+        f"应用名称: {track_name}\n"
+        f"旧版本: v{prev_version}\n"
+        f"新版本: v{latest_version}\n"
+        f"发布时间: {release_date}\n"
+        f"商店链接: {track_view_url}\n\n"
+        f"【更新说明】\n{release_notes}\n"
+    )
+    if "cloud.miplus.tft" in (source.bundle_id or "") or "yunding" in source.id.lower():
+        body += "\n【去广告提示】\n获取新版脱壳 ipa 后，运行 inject_hook.py 即可一键自动注入通用去广告 dylib。"
+
+    notify_ok = False
+    try:
+        notify_ok = bool(notifier.send(title, body, group="app-update"))
+    except Exception as exc:
+        print(f"[推送异常] [{source.name}] 调用 Bark 异常: {exc}")
+        notify_ok = False
+
+    if notify_ok:
+        record["last_notified_version"] = latest_version
+        record["version"] = latest_version
+        record["last_notified_at"] = now_iso
+        msg = f"应用更新检测成功，已推送 Bark 通知 (旧:v{prev_version} -> 新:v{latest_version})"
+        print(f"[通知成功] [{source.name}] {msg}")
+        return ChangeResult(
+            source_id=source.id,
+            source_name=source.name,
+            status="CHANGED_AND_NOTIFIED",
+            changed=True,
+            notified=True,
+            latest_hash=latest_version,
+            reviewed_hash=prev_version,
+            message=msg,
+        )
+    else:
+        msg = f"应用更新检测成功，但 Bark 通知失败，保留未通知状态下次重试 (v{latest_version})"
+        print(f"[通知失败] [{source.name}] {msg}")
+        return ChangeResult(
+            source_id=source.id,
+            source_name=source.name,
+            status="CHANGED_NOTIFY_FAILED",
+            changed=True,
+            notified=False,
+            latest_hash=latest_version,
+            reviewed_hash=prev_version,
+            message=msg,
+        )
+
+
 def check_source(
     source: UpstreamSource,
     state: dict[str, Any],
@@ -388,6 +610,9 @@ def check_source(
     4. Bark 失败防护：Bark 发送失败绝不能提前更新已通知哈希，下次重试。
     """
     validate_source_id(source.id)
+    if source.type == "app_store":
+        return check_app_store_source(source, state, session=session, notifier=notifier)
+
     now_iso = datetime.now(timezone.utc).isoformat()
     content_bytes, current_hash = fetch_upstream_content(source.url, session=session)
     sources_state = state.setdefault("sources", {})

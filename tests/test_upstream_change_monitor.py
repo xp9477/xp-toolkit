@@ -493,3 +493,80 @@ class UpstreamChangeMonitorCLITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AppStoreMonitorTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.state_path = Path(self.temp_dir.name) / "state.json"
+        self.sample_app = monitor.UpstreamSource(
+            id="cloud.miplus.tft",
+            name="云顶攻略助手",
+            type="app_store",
+            bundle_id="cloud.miplus.tft",
+            enabled=True,
+        )
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    @patch("requests.get")
+    def test_app_store_baseline_and_update(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "resultCount": 1,
+            "results": [
+                {
+                    "trackName": "云顶攻略助手",
+                    "version": "5.7.2",
+                    "currentVersionReleaseDate": "2026-09-15T08:36:15Z",
+                    "releaseNotes": "1. 赛季更新",
+                    "trackViewUrl": "https://apps.apple.com/app/id1554801875",
+                }
+            ],
+        }
+        mock_get.return_value = mock_resp
+
+        mock_notifier = MagicMock()
+        mock_notifier.send.return_value = True
+
+        state = {}
+        # 1. 首次基线
+        res1 = monitor.check_app_store_source(
+            self.sample_app, state, notifier=mock_notifier
+        )
+        self.assertEqual(res1.status, "BASELINE_ESTABLISHED")
+        self.assertFalse(res1.changed)
+        mock_notifier.send.assert_not_called()
+
+        # 2. 版本未变更
+        res2 = monitor.check_app_store_source(
+            self.sample_app, state, notifier=mock_notifier
+        )
+        self.assertEqual(res2.status, "UNCHANGED")
+        mock_notifier.send.assert_not_called()
+
+        # 3. 版本更新
+        mock_resp.json.return_value = {
+            "resultCount": 1,
+            "results": [
+                {
+                    "trackName": "云顶攻略助手",
+                    "version": "5.7.3",
+                    "currentVersionReleaseDate": "2026-10-02T10:00:00Z",
+                    "releaseNotes": "修复已知问题",
+                    "trackViewUrl": "https://apps.apple.com/app/id1554801875",
+                }
+            ],
+        }
+        res3 = monitor.check_app_store_source(
+            self.sample_app, state, notifier=mock_notifier
+        )
+        self.assertEqual(res3.status, "CHANGED_AND_NOTIFIED")
+        self.assertTrue(res3.changed)
+        self.assertTrue(res3.notified)
+        mock_notifier.send.assert_called_once()
+        call_args = mock_notifier.send.call_args[0]
+        self.assertIn("v5.7.3", call_args[0])
+        self.assertIn("inject_hook.py", call_args[1])
