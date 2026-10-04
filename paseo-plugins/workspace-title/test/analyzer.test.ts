@@ -205,8 +205,8 @@ test("analyzeWorkspaceTask calls classifyFn with generated prompt and returns Cl
   assert.ok(receivedPrompt.includes("正在分析代码并进行重构。"));
 });
 
-test("getResolvedModelConfig strictly resolves gemini-3.5-flash-lite and never falls back to unauthorized models", () => {
+test("getResolvedModelConfig strictly resolves gemini and never falls back to unauthorized models", () => {
   const meta = getResolvedModelConfig();
-  assert.equal(meta.model, "gemini-3.5-flash-lite");
+  assert.equal(meta.model, "gemini");
   assert.notEqual(meta.model, "gemini-3.8-flash-high");
 });

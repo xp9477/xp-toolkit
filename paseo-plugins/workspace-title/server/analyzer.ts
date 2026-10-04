@@ -285,12 +285,12 @@ export function getResolvedModelConfig(): {
     } catch {}
   }
 
-  // Default strictly to gemini-3.5-flash-lite
-  return { provider: "codex", model: "gemini-3.5-flash-lite", source: "default" };
+  // Default strictly to gemini
+  return { provider: "codex", model: "gemini", source: "default" };
 }
 
 /**
- * Classification via LLM (gemini-3.5-flash-lite) using the Codex CLI.
+ * Classification via LLM (gemini) using the Codex CLI.
  */
 export async function classifyWithLlm(
   prompt: string,
@@ -356,7 +356,7 @@ export async function classifyWithLlm(
 }
 
 /**
- * Main task analyzer: extracts full first-turn context and uses LLM (gemini-3.5-flash-lite)
+ * Main task analyzer: extracts full first-turn context and uses LLM (gemini)
  * to summarize the task type and topic. All heuristic keyword matching is removed.
  */
 export async function analyzeWorkspaceTask(input: {
