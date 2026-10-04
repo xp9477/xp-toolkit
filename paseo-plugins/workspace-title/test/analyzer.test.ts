@@ -6,6 +6,7 @@ import {
   parseLlmClassificationJson,
   analyzeWorkspaceTask,
   getResolvedModelConfig,
+  buildClassificationArgs,
 } from "../server/analyzer";
 
 test("extractFirstTurnContext extracts user instruction and assistant reply", () => {
@@ -209,4 +210,14 @@ test("getResolvedModelConfig strictly resolves gemini and never falls back to un
   const meta = getResolvedModelConfig();
   assert.equal(meta.model, "gemini");
   assert.notEqual(meta.model, "gemini-3.8-flash-high");
+});
+
+test("classification uses the selected Codex model with Apps disabled only for this invocation", () => {
+  const args = buildClassificationArgs("gemini", "classify task");
+  assert.equal(args[args.indexOf("-m") + 1], "gemini");
+  assert.ok(args.includes("features.apps=false"));
+  assert.equal(args[args.indexOf("features.apps=false") - 1], "-c");
+  assert.ok(args.includes('model_reasoning_effort="none"'));
+  assert.equal(args[args.indexOf("-s") + 1], "read-only");
+  assert.equal(args.at(-1), "classify task");
 });

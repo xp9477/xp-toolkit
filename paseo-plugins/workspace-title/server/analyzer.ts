@@ -289,6 +289,24 @@ export function getResolvedModelConfig(): {
   return { provider: "codex", model: "gemini", source: "default" };
 }
 
+export function buildClassificationArgs(model: string, prompt: string): string[] {
+  return [
+    "exec",
+    "--ephemeral",
+    "-m",
+    model,
+    "-c",
+    'model_reasoning_effort="none"',
+    "-c",
+    // Title classification needs no Apps tools; their schemas can reject Gemini requests.
+    "features.apps=false",
+    "-s",
+    "read-only",
+    "--skip-git-repo-check",
+    prompt,
+  ];
+}
+
 /**
  * Classification via LLM (gemini) using the Codex CLI.
  */
@@ -302,18 +320,7 @@ export async function classifyWithLlm(
   console.log(`[workspace-title] LLM classifying via ${model} (source: ${meta.source})`);
 
   return new Promise((resolve) => {
-    const args = [
-      "exec",
-      "--ephemeral",
-      "-m",
-      model,
-      "-c",
-      'model_reasoning_effort="none"',
-      "-s",
-      "read-only",
-      "--skip-git-repo-check",
-      prompt,
-    ];
+    const args = buildClassificationArgs(model, prompt);
 
     const child = spawn("codex", args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -339,7 +346,8 @@ export async function classifyWithLlm(
 
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code !== 0 && !stdout) {
+      if (code !== 0) {
+        console.error(`[workspace-title] LLM exited with code ${code}: ${stderr.slice(-2000)}`);
         return resolve(null);
       }
 
