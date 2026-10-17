@@ -1,16 +1,23 @@
 {
   "name": "@xp-toolkit/codex-site-research",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Dependency-free, read-only forum research MCP and local Chrome bridge",
-  "engines": { "node": ">=22" },
+  "description": "Read-only forum research using an isolated persistent browser; no extension or pairing",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "check": "node scripts/check-package.mjs",
-    "pair": "node scripts/cli.mjs pair",
     "status": "node scripts/cli.mjs status",
     "stop": "node scripts/cli.mjs stop",
-    "mcp": "node scripts/mcp-server.mjs"
+    "mcp": "node scripts/mcp-server.mjs",
+    "login": "node scripts/cli.mjs login",
+    "install-runtime": "node scripts/install-runtime.mjs",
+    "test:browser": "node --test tests-browser/*.test.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.1"
   }
 }

@@ -1,4 +1,4 @@
-import { ORIGIN, validateRequest } from '../../extension/policy.mjs';
+import { ORIGIN, validateRequest } from '../policy.mjs';
 
 const safeText = (value, max = 1000) => typeof value === 'string' ? value.slice(0, max) : '';
 const entities = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
@@ -106,4 +106,4 @@ export function plan(operation, args) {
       scope: '单次帖子窗口；next_post 非空时应继续读取，不能称为已读完整帖' };
   } };
 }
-export const linuxdo = { id: 'linuxdo', name: 'Linux.do', origin: ORIGIN, auth: 'browser-session', read_only: true, plan };
+export const linuxdo = { id: 'linuxdo', name: 'Linux.do', origin: ORIGIN, auth: 'dedicated-browser-session', read_only: true, plan };

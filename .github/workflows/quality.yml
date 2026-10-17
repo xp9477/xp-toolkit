@@ -58,11 +58,22 @@ jobs:
             node --check --experimental-strip-types "$file"
           done < <(find scripting -type f -name '*.ts' -print0)
 
+      - name: Install locked Codex plugin runtime
+        run: npm --prefix codex-plugin/plugins/site-research ci --ignore-scripts
+
+      - name: Audit Codex plugin dependencies
+        run: npm --prefix codex-plugin/plugins/site-research audit --omit=dev
+
       - name: Validate Codex personal plugin package
         run: npm --prefix codex-plugin/plugins/site-research run check
 
       - name: Test Codex personal plugin
         run: npm --prefix codex-plugin/plugins/site-research test
+
+      - name: Smoke test dedicated Chrome session with offline fixtures
+        env:
+          XP_TEST_BROWSER_PATH: /usr/bin/google-chrome
+        run: npm --prefix codex-plugin/plugins/site-research run test:browser
 
       - name: Run JavaScript unit tests
         run: node --test tests/js/*.test.mjs

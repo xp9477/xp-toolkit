@@ -178,14 +178,17 @@ unsafe opt-in。
 
 ### Codex 个人插件
 
-`codex-plugin/` 是独立的本地插件市场。`plugins/site-research/` 包含兼容插件清单、Skills、
-无第三方依赖的 Node.js stdio MCP 和 Chrome MV3 扩展；不依赖青龙或顶层 Skills 运行时。
+`codex-plugin/` 是独立本地插件市场。`plugins/site-research/` 包含插件清单、Skills、Node stdio MCP、
+锁定的 Playwright Core 依赖和专用浏览器会话；不依赖青龙、顶层 Skills 或浏览器扩展。
 
-信任路径是 Codex → stdio MCP → 配对令牌保护的 IPv4 loopback 桥接 → 用户显式连接的专用站点标签页。
-网站密码和 Cookie 留在浏览器，账号读取仅限用户权限；网站 JSON 最小化投影后才返回模型，正文不缓存。
-本机配对令牌不进入仓库或网页上下文。桥接与扩展双重验证站点/端点白名单，仅允许 GET；新网站必须
-同步增加适配器、权限、显式启用流程和测试，不开放任意 URL 代理。只读请求仍可能更新站点访问记录。
+信任路径是 Codex → stdio MCP → 自动鉴权的 IPv4 loopback 浏览器服务 → 专用 Chrome 配置。
+本机服务密钥由程序管理，不让用户复制配对码；网站登录由用户在独立窗口完成，不接管日常 Chrome 配置。
+浏览器使用进程管道控制，不开放浏览器调试 TCP 端口。密码/Cookie 不导出，专用 profile 包含敏感会话数据，
+保存在用户私有目录且不入库。读取在 CDP isolated world 完成，站点请求只允许白名单 GET，正文投影后才返回模型。
 
-离线验证：`npm --prefix codex-plugin/plugins/site-research test` 与 `run check`；CI 发现插件包内测试，
-检查分发入口、市场路径、版本和权限完整性。真实浏览器安装、登录及网站访问是单独的人工验证门槛，
-不因模拟测试通过而被标记为已验证。当前包没有第三方 npm 依赖，仍保留 lockfile 和 Dependabot 入口。
+0.2.0 删除旧扩展源码，新服务使用 47832，避免与旧 47831 桥接混淆；不自动删除用户的旧扩展/登录状态。
+站点读取仍可能更新访问记录。新站点必须同时实现适配器、origin/端点策略、会话隔离和行为测试。
+
+CI 发现插件离线测试、包入口/版本/市场/锁文件检查；锁定 npm 依赖受审计与 Dependabot 维护。
+`test:browser` 用临时浏览器配置和本地 fixture 验证真实浏览器隔离执行、登录会话重启复用，
+不以此冒充真实账号/目标帖子已验证。正式账号访问须由用户首次手动登录后另行确认。

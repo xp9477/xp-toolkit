@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { topicId, htmlToText, plan } from '../src/adapters/linuxdo.mjs';
-import { validateRequest } from '../extension/policy.mjs';
+import { validateRequest } from '../src/policy.mjs';
 import { callTool, tools } from '../src/tools.mjs';
-import { executeTask } from '../extension/runner.mjs';
+
 
 test('topic selection never accepts other origins, credentials or traversal', () => {
   for (const input of ['3014361', 'https://linux.do/t/topic/3014361', 'https://linux.do/t/3014361/2', 'https://linux.do/t/topic/3014361?u=fixture#post', 'https://linux.do/t/%E6%B5%8B%E8%AF%95/3014361']) assert.equal(topicId(input), '3014361');
@@ -51,18 +51,4 @@ test('tool schemas are read-only and argument validation precedes network access
   const result = await callTool('research_sites', {}, never);
   assert.deepEqual(result.sites.map(s => s.id), ['linuxdo']);
   await assert.rejects(callTool('research_search', { query: 'x' }, { request: async () => ({ error: 'HTTP_404' }) }), /不能仅据此/u);
-});
-test('extension only uses its selected site tab and executes in the isolated world', async () => {
-  let injected;
-  const api = {
-    storage: { local: { get: async () => ({ linuxdoTabId: 10 }) } },
-    tabs: { get: async () => ({ id: 10, url: 'https://linux.do/' }) },
-    scripting: { executeScript: async options => { injected = options; return [{ result: { status: 200, data: { fixture: true } } }]; } },
-  };
-  const result = await executeTask(api, { site: 'linuxdo', path: '/latest.json' });
-  assert.equal(result.status, 200); assert.equal(injected.world, 'ISOLATED');
-  assert.deepEqual(injected.target, { tabId: 10 }); assert.deepEqual(injected.args, ['/latest.json']);
-  api.tabs.get = async () => ({ id: 10, url: 'https://evil.test/' });
-  assert.equal((await executeTask(api, { site: 'linuxdo', path: '/latest.json' })).error, 'BROWSER_TAB_REQUIRED');
-  await assert.rejects(executeTask(api, { site: 'linuxdo', path: '/posts.json' }));
 });

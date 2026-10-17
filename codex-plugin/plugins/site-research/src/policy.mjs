@@ -1,8 +1,8 @@
-// Shared by the broker and extension. Adding a site requires an explicit policy change.
+// Shared by the local daemon and browser transport. New sites need an explicit allowlist.
 export const SITE = 'linuxdo';
 export const ORIGIN = 'https://linux.do';
 export const MAX_BYTES = 2 * 1024 * 1024;
-export const BRIDGE_BASE = 'http://127.0.0.1:47831';
+export const BRIDGE_BASE = 'http://127.0.0.1:47832';
 
 export function validateRequest(task) {
   if (!task || task.site !== SITE || typeof task.path !== 'string') {
@@ -30,7 +30,7 @@ export function validateRequest(task) {
   return url.href;
 }
 
-// Runs in Chrome's ISOLATED world. Must remain self-contained (no closure imports).
+// Runs in a CDP isolated world, never the page's main JavaScript context. Self-contained.
 export async function fetchInSite(path) {
   if (location.origin !== 'https://linux.do') return { error: 'WRONG_SITE' };
   const abort = new AbortController();

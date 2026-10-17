@@ -1,36 +1,47 @@
 # Codex 个人插件
 
-这里是 xp-toolkit 的个人插件市场和独立交付物，不是公共插件商店。当前唯一插件是
-[`site-research`](plugins/site-research/README.md)：本机账号桥接、论坛信息和解决方案检索。
-目前仅接入 **Linux.do**，其他站点还没有实现。
+xp-toolkit 的本机个人插件市场，不是公开插件商店。当前插件：
+[Site Research](plugins/site-research/README.md)，首先支持 Linux.do 的信息和解决方案只读检索。
+**0.2.0 起不需要浏览器扩展、不需要配对码。** 首次在插件专用 Chrome 窗口登录，后续复用会话。
 
-## 在 Codex 中安装
+## 本机安装
 
-从仓库根目录运行（要求支持插件命令的 Codex 桌面版 / CLI）：
+在仓库根目录运行：
 
 ```bash
 codex plugin marketplace add ./codex-plugin
 codex plugin add site-research@xp-toolkit-personal
+npm --prefix codex-plugin/plugins/site-research run install-runtime
 ```
 
-如当前客户端不提供 `plugin add`，注册市场后重启桌面应用，在插件目录里选择
-**XP Toolkit · 个人插件**，安装 **Site Research · 站点检索**。重启/新开聊天后才会加载新 MCP，
-当前对话不保证能热加载。这里只注册本机市场，没有向公共市场提交或发布。
+要求支持插件命令的 Codex、Node.js >=22、npm 和已安装的 Google Chrome。
+运行时安装只下载锁定版本的 `playwright-core`，不下载浏览器、不执行依赖安装脚本。
+缓存位于用户私有状态目录，不提交到仓库。注册市场不会向公开目录发布插件。
 
-插件独立依赖 Node.js >=22（无第三方运行时依赖，不需要 `npm install`）。
-下一步按插件 README 在 Chrome 加载 `extension/` 并手动配对、登录。**安装插件不等于已连接账号。**
+重启或新开 Codex 聊天，输入“用 Site Research 打开 Linux.do 登录窗口”。自己在打开的专用窗口
+登录/验证即可；后续直接给帖子链接或提出检索问题。浏览器窗口打开不等于账号已登录。
+
+也可在自己的终端运行：
+
+```bash
+npm --prefix codex-plugin/plugins/site-research run login
+```
+
+这只打开专用窗口，不需要复制任何密钥，也不要求 Chrome 调试端口或加载扩展。
 
 ## 验证与维护
 
 ```bash
+npm --prefix codex-plugin/plugins/site-research ci --ignore-scripts
 npm --prefix codex-plugin/plugins/site-research test
 npm --prefix codex-plugin/plugins/site-research run check
+npm --prefix codex-plugin/plugins/site-research run test:browser
 npm --prefix codex-plugin/plugins/site-research audit --omit=dev
 ```
 
-当前测试覆盖离线协议、模拟浏览器链路、权限边界和分段投影；不使用真实 Cookie，也不假装已完成
-Linux.do 账号或 Cloudflare 实测。版本来自插件/package/扩展三个清单，完整性检查要求一致。
-CI 自动运行这些离线测试和包内语法/目录/权限校验；`package-lock.json` 固定分发依赖图（当前为空）。
+`test` 是离线协议/安全边界测试；`test:browser` 用临时浏览器配置、本地拦截的站点响应，验证真实
+浏览器中持久登录会话重启复用和隔离世界读取，不使用真实账号/站点响应。它需要 Chrome。
+Linux CI 在明确准备浏览器后运行冒烟测试；`XP_TEST_BROWSER_PATH` 可指定测试浏览器可执行文件。
+`run check` 校验分发路径、版本、市场、锁文件和语法，不把 `node_modules` 算入包摘要。
 
-新增插件放在 `plugins/<name>/` 并更新 `.agents/plugins/marketplace.json`。
-插件是独立运行时，不隐式依赖 `qinglong/`、`skills/` 等顶层组件。
+新增插件放 `plugins/<name>/` 并更新 `.agents/plugins/marketplace.json`；插件之间没有隐式运行时依赖。

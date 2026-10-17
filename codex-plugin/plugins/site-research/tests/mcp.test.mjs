@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { fetchInSite } from '../extension/policy.mjs';
+import { fetchInSite } from '../src/policy.mjs';
 
 test('stdio MCP handshake, tool discovery and errors produce only valid JSON-RPC', async () => {
   const child = spawn(process.execPath, [fileURLToPath(new URL('../scripts/mcp-server.mjs', import.meta.url))], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -24,7 +24,7 @@ test('stdio MCP handshake, tool discovery and errors produce only valid JSON-RPC
   assert.equal(responses.length, 7);
   assert.equal(responses[0].error.code, -32002);
   assert.equal(responses[1].result.protocolVersion, '2025-06-18');
-  assert.equal(responses[2].result.tools.length, 6);
+  assert.equal(responses[2].result.tools.length, 8);
   assert.equal(JSON.parse(responses[3].result.content[0].text).sites[0].id, 'linuxdo');
   assert.equal(responses[4].result.isError, true);
   assert.equal(responses[5].error.code, -32601);

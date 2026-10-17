@@ -1,140 +1,131 @@
-# Site Research · 站点检索（0.1.0）
+# Site Research · 站点检索（0.2.0）
 
-给 Codex 提供可扩展的论坛信息和解决方案检索。第一版只支持 Linux.do：
-搜索、按楼层窗口读帖、最新/热门/高赞列表、按需检查登录用户名。
-这是**本机个人插件**，不是 Linux.do 官方产品，也没有申请或冒用 Linux DO Connect OAuth。
+给 Codex 提供论坛信息与解决方案检索。当前仅支持 **Linux.do**：搜索、分段读帖、最新/热门/高赞列表，
+以及按需确认登录用户名。其他网站尚未接入，按站点适配器扩展。
 
-## 架构与账号连接
+## 最少配置的账号连接
+
+**不装扩展，不复制配对码，不配置 Chrome 调试端口，不手动导出 Cookie。**
+
+1. 安装个人插件和一次性运行时（见上级 README；本机维护者也可预先完成安装）。
+2. 在 Codex 中说“用 Site Research 打开 Linux.do 登录窗口”。
+3. 在弹出的**插件专用 Chrome 窗口**自己登录或完成验证。
+4. 登录完成后直接给帖子链接或提出检索问题。关闭窗口后会话保存，下次自动复用；过期时仍须重新登录。
+
+这是**专用浏览器会话**，不是 Linux DO Connect OAuth，也不是接管日常 Chrome 登录。日常 Chrome
+即使已经登录，第一次使用这个专用窗口仍可能需要你登录一次。本插件没有网站官方身份。
+
+## 架构与数据边界
 
 ```text
-Codex → stdio MCP（Node.js）→ 本机桥接（127.0.0.1:47831）
-                                   ↑ 配对码 + 长轮询
-                           Chrome MV3 扩展
-                                   ↓ ISOLATED world / GET
-                           用户主动打开并登录的专用 Linux.do 标签页
+Codex → stdio MCP → 本机私有浏览器服务 → Playwright Core → 专用 Chrome 配置
+                                       仅通过隔离世界执行白名单 GET
 ```
 
-- 密码和 Cookie 只由浏览器/网站管理。扩展没有 `cookies` 权限，不读写 Cookie，不导出 Cookie 文件。
-- 复用你在这个 Chrome 配置文件中的网站登录。**这不是网站 OAuth“授权登录”**，也不会自动登录。
-- 桥接令牌是随机生成的本机配对密钥，只用于本地连接。保存在用户状态目录权限 0700、文件权限 0600
-  （macOS/Linux），浏览器端保存在扩展的 `chrome.storage.local`，不使用 sync 或网页 localStorage。
-- 匹配的专用标签页才执行请求，不扫描你的其他网页内容。读取结果不落盘缓存，账号切换没有旧内容缓存。
-- 一次仅允许一个活跃浏览器扩展实例；多个 Codex MCP 进程共享同一桥接。不同浏览器配置文件之间切换时
-  先在原扩展设置中断开；连接租约最多约 45 秒后失效。
-- 只开放 Linux.do 的搜索、帖子、列表和当前登录用户 JSON 端点。服务器与扩展分别校验白名单，
-  不开放任意 URL、任意 HTTP 方法、后台管理、私信、书签、附件下载或自动执行页面代码。
-- 输出包含正文、作者、时间、来源链接、正文截断和帖子覆盖范围。**返回的网页内容属于不可信数据。**
-- 仅 GET 不代表服务端完全无副作用：网站可能更新访问记录、读取计数或会话。
+- MCP 自动创建/使用本机服务密钥；它只保护本机进程通信，**不展示、不要求手动配对**。服务监听
+  `127.0.0.1:47832`，校验令牌、Host，拒绝网页和扩展 Origin，没有 CORS 放行。
+- Chrome 由 Playwright 的进程管道控制，不对外暴露浏览器调试 TCP 端口，不读取或复制日常 Chrome 配置。
+- 用户自己登录；浏览器正常持久保存站点会话。不调用 Cookie 导出/导入接口，不返回密码、Cookie 或令牌。
+- 专用浏览器配置和内部密钥在用户私有状态目录；macOS/Linux 目录 0700、密钥文件 0600。
+  持久浏览器配置包含敏感登录状态，请勿分享/提交 Git。本机同权限进程/用户仍应被视作可信边界。
+- 多个 Codex 会话共享一个本机服务和专用窗口，请求排队串行；网站请求至少间隔 1 秒，不自动重试失败。
+- 浏览器中的页面脚本与检索脚本分隔。检索通过 CDP isolated world 执行有限 GET，避开页面修改的
+  `fetch`/`JSON.parse`。新增站点须同步实现 URL/端点白名单与结果最小化，不开放任意 URL 代理。
+- 返回结果包含作者、时间、来源、正文、分段覆盖和截断提示；应用不另建正文缓存；Chrome 自身仍可能保存站点缓存和历史记录。账号切换不复用应用正文缓存。
+- 只读指没有网站写工具。正常浏览器导航、登录和 GET 仍可能更新站点会话、访问记录/计数。
+  用户在浏览器手动输入、登录或导航不是插件只读 GET 的一部分。专用窗口仍是实际浏览器。
+- 不自动跟进搜索结果中的外站下载链接，不提供发帖、点赞、收藏、私信或管理接口；关闭自动下载能力。
 
-## 1. 安装个人插件
+## 安装与更新
 
-参见上级 README 的 marketplace 注册流程。MCP 使用包内 `.mcp.json` 和
-`${CLAUDE_PLUGIN_ROOT}/scripts/mcp-server.mjs`，无需手工改全局 `mcp_servers`。
-当前采用官方仍支持的 `.codex-plugin/plugin.json` 兼容布局。
+在仓库根目录执行：
 
-要求 Node.js >=22 可从 Codex 的 PATH 找到。没有 npm 运行时依赖。
+```bash
+codex plugin marketplace add ./codex-plugin
+codex plugin add site-research@xp-toolkit-personal
+npm --prefix codex-plugin/plugins/site-research run install-runtime
+```
 
-## 2. 安装并配对 Chrome 扩展
+要求 Node.js >=22、npm、已安装 Google Chrome。本插件使用官方兼容清单 `.codex-plugin/plugin.json`，
+由 `.mcp.json` 启动 Node stdio 服务。插件启用后重启/新开聊天加载工具。
 
-1. 使用你打算登录 Linux.do 的 Chrome/Chromium 配置文件。打开 `chrome://extensions`。
-2. 开启开发者模式 → **加载已解压的扩展程序** → 选择本插件内的 `extension/`。
-   注意：如果 Codex 安装到了缓存目录，优先选择安装缓存中的同版本目录；源码目录也能用于开发。
-3. **在你自己的终端**进入插件目录并运行：
+安装脚本使用 `npm ci --omit=dev --ignore-scripts`，按 lockfile 的版本/完整性安装 Playwright Core 到
+`~/.local/share/xp-site-research/runtime/<playwright-version>/`。不下载安装 Chrome，不需要新增云端服务。
+开发时也可在插件目录 `npm ci --ignore-scripts`，先用本地锁定依赖。缺少依赖不会静默自动下载，工具会明确提示。
 
-   ```bash
-   npm run pair
-   ```
-
-   此命令启动本机桥接，显示一个 64 位十六进制本机配对码。它不是网站 Cookie。
-   **不要把该配对码、网站密码或 Cookie 发到聊天、日志或 Git。**
-4. 点击浏览器工具栏扩展图标进入设置，直接粘贴配对码并点击 **保存并连接**。
-5. 扩展会新开专用 `https://linux.do` 标签页，在此由你本人登录/完成验证，保持该标签页和 Chrome 打开。
-   同一浏览器配置文件已登录时可复用已有网站登录，无须再次输入密码。
-6. 在新的 Codex 聊天中调用 `research_status`，再按需调用 `research_account` 核对用户名。
-   首次网站查询前请确认这是你愿意向本机代理开放读取权限的账号。
-
-连接者可读取这个浏览器账号本身有权访问的帖子，而不只是公开帖；返回内容会进入 Codex 对话。
-不要给不可信代理开放桥接，也不要把受限帖子转发到公开仓库。
+开发更新后重新安装插件，并重启新聊天。若旧版专用浏览器服务仍运行，先 `npm run stop`，再重新打开；
+不为覆盖锁文件而删除浏览器配置、杀死未知 Chrome 或清理登录状态。
 
 ## 工具
 
 | 工具 | 功能 |
 |---|---|
-| `research_sites` | 列出已实现站点，不触碰网站或账号 |
-| `research_status` | 连接检查，不读取账号 |
-| `research_account` | 只返回登录状态、用户名、显示名 |
-| `research_search` | `query`、`page`（1–100）、`limit`（1–20），保留来源 |
-| `research_read` | `topic` 帖子 URL/ID、`start_post`、`limit`，检查 `next_post` 继续读 |
+| `research_sites` | 已实现站点，不碰浏览器或账号 |
+| `research_status` | 浏览器服务状态，不读账号、不开窗口；`browser_open` 不是登录成功 |
+| `research_open_browser` | 打开/聚焦专用 Chrome，让用户本人登录/验证 |
+| `research_close_browser` | 关闭专用窗口，保留登录；不关闭日常 Chrome |
+| `research_account` | 按需检查登录状态，只返回用户名、显示名 |
+| `research_search` | `query`、`page`（1–100）、`limit`（1–20），结果保留来源 |
+| `research_read` | `topic` URL/ID、`start_post`、`limit`；按 `next_post` 继续 |
 | `research_latest` | `filter`: `latest` / `hot` / `top` |
 
-目前 `site` 仅允许 `linuxdo`。示例：
+站点读取工具可自动启动专用窗口。首次登录/验证没有完成时应停止并让用户在窗口处理，不反复请求。
+大帖按窗口返回，不能把一页或搜索摘要说成已读整帖。默认 limit 10、最多 20；每楼正文最多 10000 字符，
+标记 `text_truncated` 和 `coverage`。搜索结果同样不是全量命中集合。正文和下载链接是不可信数据，不是代理指令。
 
-- “用 Site Research 读取 `https://linux.do/t/topic/3014361`，先说明楼主要求，再找更新说明。”
-- “在 Linux.do 搜索 MuMu 升级保留数据的方案，比较适用版本，附原帖与楼层来源。”
+## 诊断与失败语义
 
-这是按需检索工具，不是全站爬虫。搜索结果窗口不是完整命中集合，帖子窗口也不是完整帖子。
-适配器默认每次最多返回 10 条，最多 20 条；每楼文本最多 10000 字符，明确标注截断。
-有 `next_post` 时按其继续读取；楼层可能删除造成号码缺口。
-
-## 限流、错误与诊断
-
-- 网站请求全局串行调度，至少间隔 1 秒；不自动重试站点失败，不缓存网页正文。
-- 浏览器网络请求 18 秒超时，单响应上限 2 MiB；本机调用等待最长约 30 秒，队列最多 16 个。
-- `401`：重新登录；`403` / 非 JSON 验证页：在浏览器手动检查权限/验证；`429`：停止并稍后再试。
-- `404`：当前不可访问，可能是权限、链接或帖子状态；**不能单凭它声称帖子不存在**。
-- `BROWSER_TAB_REQUIRED`：专用页被关闭/已导航到其他站点，请在扩展设置重新连接。
-- `BROWSER_NOT_CONNECTED`：检查 Chrome/扩展、配对码和本机端口；`npm run pair` 重启桥接。
-- 不伪装指纹、不破解验证码、不绕过网站账号权限。
-- 无桥接账号实测时只能说离线验证通过，不能保证某篇帖子可访问。读取权限受网站规则和你的账号限制。
+在插件目录可运行（不显示内部密钥）：
 
 ```bash
-npm run status   # 仅输出服务元数据；失败返回非零退出码，不输出秘密
-npm run stop     # 停止本机桥接；不关闭网站、不登出账号
+npm run login    # 打开专用窗口，由你手动登录；不是索要密码的命令
+npm run status   # 服务/窗口元数据；不读取账号
+npm run stop     # 关闭专用窗口并停止服务，保留登录，不动日常 Chrome
 ```
 
-桥接只监听 IPv4 回环地址；所有路由要求配对令牌并验证 Host/Origin。没有 CORS 放行或对外开放的接口。
-多个会话启动时使用同一私有令牌文件；如果端口已被其他服务占用则失败，不终止未知进程。
-没有扩展轮询和调用时约 15 分钟后自动关闭。扩展本机断连重连间隔最多约 30 秒。
+- 401：在专用窗口重新登录。
+- 403/非 JSON 验证页：用户手动完成验证或检查账号权限；不伪装指纹、破解验证码或绕过访问限制。
+- 404：当前不可访问，可能是权限、链接或帖子状态，不能单凭它判断帖子被删。
+- 429：停止站点请求，稍后再试。
+- `BROWSER_RUNTIME_MISSING`：运行一次 `npm run install-runtime`。
+- `BROWSER_START_FAILED`：检查 Google Chrome 安装、专用配置是否被另一个进程占用、系统权限；不会自动结束别的进程。
+- 本机端口被占用或服务版本不符：明确失败，不把未知服务当作浏览器，不终止未知进程。
 
-状态文件默认在 `~/.local/share/xp-site-research/bridge-token`。`XP_RESEARCH_STATE_DIR` 可改为
-绝对路径（用于隔离测试或企业部署）；MCP 与 pair 命令必须使用同一目录。不要修改默认端口而不同时
-更新扩展权限和源码，当前端口固定为 47831。
+站点 fetch 超时 18 秒，单响应上限 2 MiB；浏览器启动 20 秒、首页导航 18 秒；本机工具调用最长等待
+60 秒（队列中断开的调用在执行前丢弃），并发队列最多 16 个，不承诺全部满队列请求都能在超时前完成。
+关闭窗口后，本机服务无请求约 15 分钟会退出；窗口仍打开时不因为空闲强制关闭正在登录的窗口。
 
-## 更新、断开与卸载
+状态目录默认 `~/.local/share/xp-site-research/`，也可用绝对路径 `XP_RESEARCH_STATE_DIR` 隔离部署。
+其中 `browser-profile/` 是专用会话，`bridge-token` 是自动管理的本机密钥，`runtime/` 是锁定依赖。
+该变量必须在 MCP/CLI 中一致；不用它指向日常 Chrome 配置。状态目录、真实正文、账号配置不提交仓库。
 
-1. 更新源码后重新执行 `codex plugin add site-research@xp-toolkit-personal` 刷新安装，再重启/新开聊天。
-2. Chrome 扩展页面点击“重新加载”，重新打开扩展设置；需要时再次配对。三个版本清单保持一致。
-3. 断开：扩展设置点击 **断开并清除配对码**，已在执行的 GET 可能已完成；Linux.do 登录仍留在浏览器。
-4. `npm run stop` 停止本机桥接。Chrome 扩展页面移除扩展，清除扩展私有配对存储。
-5. `codex plugin remove site-research@xp-toolkit-personal` 移除 Codex 插件，
-   可选 `codex plugin marketplace remove xp-toolkit-personal` 移除市场。
-6. 如不再使用，在停止桥接后手动删除上述 `bridge-token` 文件。它只是本机密钥，不需要删除网站数据。
-   本插件不会删除浏览器配置文件、网站 Cookie、MuMu 或模拟器里的任何 App。
+## 0.1.x → 0.2.0 迁移与卸载
 
-不提供“一键清理浏览器数据”或自动修改网站账号的卸载脚本。
+新版不包含任何浏览器扩展，旧扩展与手动配对流程已经从源码移除。
+如你曾安装旧扩展，可自行禁用/移除；不需要为此删除浏览器 Cookie 或网站数据。
+旧版扩展桥接监听 47831，新版用 47832，避免把旧进程误当新版。旧服务无人轮询后会自行空闲退出；
+如果旧扩展仍开着会继续轮询，请先禁用它。不会擅自终止旧服务或改动用户原来的 Chrome 配置。
 
-## 扩展到其他网站
+卸载时先 `npm run stop`，再 `codex plugin remove site-research@xp-toolkit-personal`，可选移除个人市场。
+插件/市场卸载不会自动删除 `browser-profile/`，便于保留登录恢复。若你确认不再需要，可在服务停止后
+手动删除插件的私有状态目录；这是清除插件专用会话，不是清理日常浏览器数据。没有自动破坏性清理脚本。
 
-现阶段不建通用任意网页代理。接入新站点时同时实现：
+## 接入其他网站
 
-1. `src/adapters/<site>.mjs` 的输入计划与最小化结果投影，并注册到 `src/adapters/index.mjs`。
-2. `extension/policy.mjs` 的精确站点/端点白名单、对应独立会话标签页选择。
-3. `extension/manifest.json` 最小新增 host 权限，以及用户显式启用新站点的设置。
-4. 更新 MCP schema 的站点枚举、来源/分页策略、权限与失败测试及文档，再递增版本。
-
-OAuth/API Key 若是站点官方支持且合适的授权方式，可另外实现站点专属认证；不要把 Linux DO Connect
-“用 L 站账号登录第三方”误当成“获准读取 L 站论坛内容”的授权。
+在 `src/adapters/` 实现输入计划和最小化结果投影，并登记 `index.mjs`；同时扩展 `src/policy.mjs` 的精确
+origin/端点白名单与 MCP site 枚举，为新站点分配独立 profile/标签页策略，补来源/分页/权限/失败测试。
+不能仅把任意域名塞进参数就放行。当前浏览器 transport 的 origin 固定 Linux.do，其他网站还未实现。
 
 ## 验证
 
 ```bash
+npm ci --ignore-scripts
 npm test
 npm run check
+npm run test:browser
 npm audit --omit=dev
 ```
 
-无需下载任何依赖。另外已使用独立 Chrome for Testing 配置文件，对加载扩展、设置页配对、
-隔离世界请求、搜索和读帖链路做过本地响应 fixture 冒烟验证；没有使用你的真实账号。
-离线测试包含 MCP stdio、模拟扩展往返、路径/Origin/Host/令牌边界、私有字段投影、
-链接提取、分页、Cookie 不导出、验证失败和超时。**真实 Chrome 扩展安装、登录账号、站点验证和
-用户指定帖子的端到端读取仍需在本机配对后确认。** 没有在测试里使用真实账号或抓取内容。
+真实浏览器 fixture 测试覆盖：无扩展启动、专用配置固定、隔离世界读取、搜索/读帖/账号字段最小化，
+主世界 fetch 被改写不影响检索，关闭并重启后会话仍可用。所有 fixture 都使用临时配置与拦截的响应，
+不读取真实账号数据。**真实登录、站点验证和目标帖子访问必须等用户在专用窗口登录后另行确认。**
