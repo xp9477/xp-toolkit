@@ -97,7 +97,12 @@ def notify_mac_banner(title: str, message: str) -> None:
             safe_msg = message.replace('"', '\\"')
             safe_title = title.replace('"', '\\"')
             cmd = f'display notification "{safe_msg}" with title "{safe_title}"'
-            subprocess.run(["osascript", "-e", cmd], capture_output=True, timeout=5)
+            subprocess.run(
+                ["osascript", "-e", cmd],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
         except Exception:
             pass
 
