@@ -1,0 +1,19 @@
+{
+  "name": "site-research",
+  "version": "0.1.0",
+  "description": "通过本人浏览器登录，只读检索论坛信息和解决方案；首个站点为 Linux.do。",
+  "author": { "name": "xp9477" },
+  "repository": "https://github.com/xp9477/xp-toolkit",
+  "keywords": ["research", "forums", "linuxdo", "solutions"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Site Research · 站点检索",
+    "shortDescription": "使用本人登录会话检索 Linux.do 帖子和解决方案",
+    "longDescription": "本地 MCP + 浏览器桥接，不导出 Cookie。仅按需读取帖子、搜索结果和登录用户名；未来按站点显式扩展。",
+    "developerName": "xp9477",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "defaultPrompt": ["在 Linux.do 搜索这个问题的解决方案", "读取并总结这个 Linux.do 帖子，保留来源链接"]
+  }
+}

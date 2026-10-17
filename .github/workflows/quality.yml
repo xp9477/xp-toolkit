@@ -42,6 +42,11 @@ jobs:
       - name: Run Python unit tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 
+      - name: Set up Node.js for personal plugins
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+
       - name: Check JavaScript and TypeScript syntax
         shell: bash
         run: |
@@ -52,6 +57,12 @@ jobs:
           while IFS= read -r -d '' file; do
             node --check --experimental-strip-types "$file"
           done < <(find scripting -type f -name '*.ts' -print0)
+
+      - name: Validate Codex personal plugin package
+        run: npm --prefix codex-plugin/plugins/site-research run check
+
+      - name: Test Codex personal plugin
+        run: npm --prefix codex-plugin/plugins/site-research test
 
       - name: Run JavaScript unit tests
         run: node --test tests/js/*.test.mjs

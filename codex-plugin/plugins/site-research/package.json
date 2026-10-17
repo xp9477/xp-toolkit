@@ -1,0 +1,16 @@
+{
+  "name": "@xp-toolkit/codex-site-research",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dependency-free, read-only forum research MCP and local Chrome bridge",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check-package.mjs",
+    "pair": "node scripts/cli.mjs pair",
+    "status": "node scripts/cli.mjs status",
+    "stop": "node scripts/cli.mjs stop",
+    "mcp": "node scripts/mcp-server.mjs"
+  }
+}

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Site Research · 本机配对</title><link rel="stylesheet" href="options.css"></head>
+<body><main>
+  <h1>Site Research · 本机配对</h1>
+  <p>仅允许本机 Codex 只读访问 <strong>Linux.do</strong>。密码、Cookie 保留在浏览器里，配对码只连接本机服务。</p>
+  <ol><li>在插件目录运行 <code>npm run pair</code>。</li><li>把终端显示的本机配对码填到下面。</li><li>点击连接后，在新开的 Linux.do 标签页里自行登录或完成验证，并保持该页打开。</li></ol>
+  <form id="pair-form">
+    <label for="token">本机配对码（不是 Linux.do 密码或 Cookie）</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" required pattern="[a-f0-9]{64}">
+    <button type="submit">保存并连接</button>
+    <button type="button" id="disconnect">断开并清除配对码</button>
+  </form>
+  <p id="status" role="status"></p>
+  <p>不会发帖、点赞、收藏、下载附件或自动打开搜索结果中的外部链接。读取页面可能使站点更新访问记录；不承诺“零服务端副作用”。</p>
+  <p>只连接这里新开的标签页，不自动读取你的其他标签页。关闭它后请重新连接。配对后，获得本机 MCP 使用权的工具可读取这个账号有权限访问的内容；不要向不信任的代理开放。</p>
+</main><script type="module" src="options.mjs"></script></body>
+</html>

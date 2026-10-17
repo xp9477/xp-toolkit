@@ -37,7 +37,7 @@ flowchart TB
 
 ### 1. 按交付物划分，而不是按语言划分
 
-顶层目录是部署边界：`qinglong/`、`proxy/`、`scripting/`、`userscripts/`、`skills/` 和未来的
+顶层目录是部署边界：`qinglong/`、`proxy/`、`scripting/`、`userscripts/`、`skills/`、`codex-plugin/` 和未来的
 `raycast/`。一个目录内可以共享代码；跨目录默认只能共享文档、测试约定和生成协议。
 
 这样做避免一个独立 userscript 因为“复用”仓库模块而变得无法单文件安装，也避免青龙环境被迫安装
@@ -175,3 +175,17 @@ unsafe opt-in。
 
 不要因为预计项目会变大就提前建立一个万能框架。这里优先稳定边界、确定性生成和窄接口；只有真实重复出现时
 才抽象实现。
+
+### Codex 个人插件
+
+`codex-plugin/` 是独立的本地插件市场。`plugins/site-research/` 包含兼容插件清单、Skills、
+无第三方依赖的 Node.js stdio MCP 和 Chrome MV3 扩展；不依赖青龙或顶层 Skills 运行时。
+
+信任路径是 Codex → stdio MCP → 配对令牌保护的 IPv4 loopback 桥接 → 用户显式连接的专用站点标签页。
+网站密码和 Cookie 留在浏览器，账号读取仅限用户权限；网站 JSON 最小化投影后才返回模型，正文不缓存。
+本机配对令牌不进入仓库或网页上下文。桥接与扩展双重验证站点/端点白名单，仅允许 GET；新网站必须
+同步增加适配器、权限、显式启用流程和测试，不开放任意 URL 代理。只读请求仍可能更新站点访问记录。
+
+离线验证：`npm --prefix codex-plugin/plugins/site-research test` 与 `run check`；CI 发现插件包内测试，
+检查分发入口、市场路径、版本和权限完整性。真实浏览器安装、登录及网站访问是单独的人工验证门槛，
+不因模拟测试通过而被标记为已验证。当前包没有第三方 npm 依赖，仍保留 lockfile 和 Dependabot 入口。

@@ -1,6 +1,6 @@
 # xp-toolkit
 
-个人工具 monorepo：青龙脚本、代理规则、Skills，以及后续的 Raycast 插件。
+个人工具 monorepo：青龙脚本、代理规则、Skills，Codex 个人插件，以及后续的 Raycast 插件。
 
 ## 目录
 
@@ -10,6 +10,7 @@
 | `proxy/clash/` | Clash 规则 |
 | `proxy/loon/` | Loon 规则、插件、脚本 |
 | `skills/` | 自建 Codex / Agent Skills |
+| `codex-plugin/` | Codex 个人插件市场；Site Research 首先支持 Linux.do 只读账号检索 |
 | `raycast/` | 预留：Raycast 插件 |
 | `scripting/` | iOS Scripting 组件与脚本（AI 套餐用量） |
 | `userscripts/` | 浏览器油猴脚本 |
