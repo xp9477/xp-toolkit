@@ -288,3 +288,43 @@ test("averageServices computes 5-hour averages and earliest 5h cooldown", () => 
   assert.equal(res.remaining5hPct, 80);
   assert.equal(res.reset5hHint, "1小时后");
 });
+
+test("Google parser uses the Gemini group and ignores a full Claude/GPT group", () => {
+  const parsed = api.parseAntigravity({
+    groups: [
+      {
+        displayName: "Gemini Models",
+        buckets: [
+          { bucketId: "gemini-weekly", window: "weekly", displayName: "Weekly Limit Remaining", remainingFraction: 0.198, resetTime: "2030-01-07T00:00:00Z" },
+          { bucketId: "gemini-5h", window: "5h", displayName: "Five Hour Limit Remaining", remainingFraction: 0.98, resetTime: "2030-01-01T04:00:00Z" }
+        ]
+      },
+      {
+        displayName: "Claude and GPT models",
+        buckets: [
+          { bucketId: "3p-weekly", window: "weekly", displayName: "Weekly Limit Remaining", remainingFraction: 1, resetTime: "2030-01-07T00:00:00Z" },
+          { bucketId: "3p-5h", window: "5h", displayName: "Five Hour Limit Remaining", remainingFraction: 1, resetTime: "2030-01-01T04:00:00Z" }
+        ]
+      }
+    ]
+  });
+  assert.equal(parsed.remainingPct, 19.8);
+  assert.equal(parsed.remaining5hPct, 98);
+});
+
+test("Google parser rejects a Claude-only summary instead of showing 100%", () => {
+  assert.throws(
+    () => api.parseAntigravity({
+      groups: [
+        {
+          displayName: "Claude and GPT models",
+          buckets: [
+            { bucketId: "3p-weekly", window: "weekly", displayName: "Weekly Limit Remaining", remainingFraction: 1 },
+            { bucketId: "3p-5h", window: "5h", displayName: "Five Hour Limit Remaining", remainingFraction: 1 }
+          ]
+        }
+      ]
+    }),
+    /没有 Gemini 额度/
+  );
+});

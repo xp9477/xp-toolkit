@@ -30,7 +30,7 @@ scripting/ai-quota/
 |---|---|---|---|
 | **SuperGrok** | 读取 CPA 中启用的 xAI 认证，请求 `billing?format=credits` | 周额度剩余百分比 | 账单周期重置倒计时 |
 | **ChatGPT Plus/Pro** | 读取 CPA 中启用的 OpenAI/Codex 认证，请求 `backend-api/wham/usage` | 主窗口剩余百分比（通常 7 天） | 5小时短窗口剩余及重置提示 |
-| **Google AI Pro** | 读取 CPA 中启用的 Anti Gravity / Gemini 认证，请求 `retrieveUserQuotaSummary` | 周/模型额度桶剩余 | 5小时短窗口额度 |
+| **Google AI Pro** | 读取 CPA 中启用的 Antigravity 认证，用 `antigravity/hub/2.23.0` 请求 `retrieveUserQuotaSummary`，只取 Gemini 组 | Gemini 周额度剩余 | 5小时短窗口额度 |
 
 ## 安装与配置
 

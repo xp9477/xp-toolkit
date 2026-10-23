@@ -26,6 +26,10 @@ export const URLS: Record<ServiceId, string> = {
   gemini: "googlegemini://",
 };
 
+// Cloud Code hides the Gemini quota group from clients older than 2.23.
+// The old CLI UA only returned the Claude/GPT group, which is often still 100%.
+export const ANTIGRAVITY_UA = "antigravity/hub/2.23.0 darwin/arm64";
+
 export function nativeAppURL(id: string): string {
   return URLS[id as ServiceId] || URLS.grok;
 }
@@ -557,34 +561,42 @@ export function parseChatGPTUsage(usage: any): ServiceQuota {
   };
 }
 
+function bucketText(bucket: any): string {
+  return `${bucket.window || ""} ${bucket.bucketId || ""} ${bucket.id || ""} ${bucket.label || ""}`.toLowerCase();
+}
+
 export function parseAntigravity(body: any): ServiceQuota {
   const groups = Array.isArray(body?.groups) ? body.groups : [];
   const buckets: any[] = [];
   for (const g of groups) {
+    const groupName = g.displayName || g.display_name || "";
     for (const b of g.buckets || []) {
       const remaining = Number(b.remainingFraction ?? b.remaining_fraction);
       if (Number.isNaN(remaining)) continue;
-      const remainingPct = clampPct(remaining * 100);
+      const remainingPct = clampPct(remaining <= 1 ? remaining * 100 : remaining);
+      const bucketId = b.bucketId || b.bucket_id || "";
       buckets.push({
-        id: `${b.bucketId || ""} ${g.displayName || ""} ${b.displayName || ""}`,
+        id: `${bucketId} ${groupName} ${b.displayName || b.display_name || ""}`,
         remainingPct,
         usedPct: clampPct(100 - (remainingPct || 0)),
         resetHint: parseResetHint(b.resetTime || b.reset_time, b.description),
         resetAt: parseResetTimeMs(b.resetTime || b.reset_time, b.description),
-        label: b.displayName || g.displayName || "额度",
-        bucketId: b.bucketId,
+        label: b.displayName || b.display_name || groupName || "额度",
+        bucketId,
+        window: String(b.window || "").toLowerCase(),
       });
     }
   }
   if (!buckets.length) throw new Error("无法解析 Google 额度");
-  const geminiBuckets = buckets.filter((b) => /gemini/i.test(`${b.id} ${b.label}`));
-  const pool = geminiBuckets.length ? geminiBuckets : buckets;
+  // A too-old client only receives the Claude/GPT group, which stays at 100%
+  // while Gemini itself is partly used. Never substitute that group.
+  const pool = buckets.filter((b) => /gemini/.test(bucketText(b)));
+  if (!pool.length) throw new Error("响应里没有 Gemini 额度");
   const weekly =
-    pool.find((b) => /week|weekly|周/i.test(`${b.id} ${b.label}`)) ||
-    pool.find((b) => /week|weekly|周/i.test(b.resetHint || "")) ||
+    pool.find((b) => /week|weekly|7d|周/.test(bucketText(b))) ||
     pool[0];
   const bucket5h = pool.find(
-    (b) => b !== weekly && (/5h|hour|小时/i.test(`${b.id} ${b.label}`) || b.bucketId === "gemini-5h")
+    (b) => b !== weekly && (/5h|five[-_ ]?hour|hour|小时/.test(bucketText(b)) || b.bucketId === "gemini-5h")
   );
 
   let remaining5hPct: number | null = null;
@@ -793,7 +805,7 @@ async function fetchGeminiAccount(cfg: Config, ag: CPAAuth): Promise<ServiceQuot
     header: {
       Authorization: "Bearer $TOKEN$",
       "Content-Type": "application/json",
-      "User-Agent": "antigravity/cli/1.0.13 (aidev_client; os_type=ios; arch=arm64)",
+      "User-Agent": ANTIGRAVITY_UA,
     },
     data: JSON.stringify(project ? { project } : {}),
   });
