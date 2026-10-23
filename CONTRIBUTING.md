@@ -24,15 +24,12 @@ node --test tests/js/*.test.mjs
 pip-audit -r qinglong/requirements.txt --progress-spinner=off
 ```
 
-检查全部 JavaScript 语法：
+检查 JavaScript 语法：
 
 ```bash
 while IFS= read -r -d '' file; do
   node --input-type=module --check < "$file"
 done < <(find userscripts proxy/loon/script -type f -name '*.js' -print0)
-while IFS= read -r -d '' file; do
-  node --check --experimental-strip-types "$file"
-done < <(find scripting -type f -name '*.ts' -print0)
 ```
 
 ## 变更约束

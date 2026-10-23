@@ -16,10 +16,31 @@ env:
         "enabled": true
       },
       {
-        "id": "yunding_app",
+        "id": "jufeng_camera",
         "type": "app_store",
-        "name": "云顶攻略助手",
-        "bundle_id": "cloud.miplus.tft",
+        "name": "飓风相机",
+        "app_id": "6749835845",
+        "bundle_id": "com.ysjf.lutcamera",
+        "initial_version": "1.8.2",
+        "country": "cn",
+        "enabled": true
+      },
+      {
+        "id": "byephotos_app",
+        "type": "app_store",
+        "name": "ByePhotos",
+        "app_id": "6737446757",
+        "bundle_id": "com.panicbyte.byephotos",
+        "initial_version": "2.11.0",
+        "country": "cn",
+        "enabled": true
+      },
+      {
+        "id": "scripting_app",
+        "type": "app_store",
+        "name": "Scripting",
+        "app_id": "6479691128",
+        "bundle_id": "com.scripting.ios",
         "country": "cn",
         "enabled": true
       }
@@ -34,6 +55,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import hashlib
+import html
 import json
 import os
 import re
@@ -76,6 +98,8 @@ class UpstreamSource:
     bundle_id: str = ""
     app_id: str = ""
     country: str = "cn"
+    initial_version: str = ""
+    local_version: str = ""
 
 
 @dataclass
@@ -235,13 +259,7 @@ def save_state(state_path: Path, data: dict[str, Any]) -> None:
 
 
 def load_configured_sources() -> list[UpstreamSource]:
-    """
-    统一加载监控源配置：
-    1. 优先读取脚本同名环境变量 `upstream_change_monitor`
-    2. 其次读取环境变量 `UPSTREAM_MONITOR_SOURCES`
-    3. 再次读取 `UPSTREAM_SOURCES_PATH` 指定的 JSON 文件
-    4. 兜底尝试读取本地示例配置 `upstream_sources.example.json`（若启用需明确提示未经人工审阅）
-    """
+    """从青龙环境变量加载监控源，不读取仓库里的配置文件。"""
     raw_cfg = load_config(__file__, required=False)
 
     if raw_cfg is None:
@@ -253,25 +271,8 @@ def load_configured_sources() -> list[UpstreamSource]:
                 raise ConfigError(f"UPSTREAM_MONITOR_SOURCES JSON 解析失败: {exc}")
 
     if raw_cfg is None:
-        file_path_env = get_env("UPSTREAM_SOURCES_PATH", required=False)
-        target_file = (
-            Path(file_path_env)
-            if file_path_env
-            else (ROOT_DIR / "upstream_sources.example.json")
-        )
-        if target_file.exists():
-            try:
-                with open(target_file, "r", encoding="utf-8") as f:
-                    raw_cfg = json.load(f)
-                    print(
-                        f"[提示] 未检测到生产配置，已加载示例配置文件: {target_file.name}（需人工审核后方可启用）"
-                    )
-            except (json.JSONDecodeError, OSError) as exc:
-                raise ConfigError(f"读取上游配置文件 {target_file} 失败: {exc}")
-
-    if raw_cfg is None:
         raise ConfigError(
-            "未找到上游监控配置，请配置环境变量 `upstream_change_monitor` 或提供配置文件"
+            "未找到上游监控配置，请在青龙环境变量 upstream_change_monitor 中填写 JSON"
         )
 
     raw_list: list[dict[str, Any]] = []
@@ -311,6 +312,7 @@ def load_configured_sources() -> list[UpstreamSource]:
             name = str(item.get("name") or source_id).strip()
             country = str(item.get("country") or "cn").strip()
             enabled = bool(item.get("enabled", True))
+            init_ver = str(item.get("initial_version") or item.get("local_version") or "").strip()
             sources.append(
                 UpstreamSource(
                     id=source_id,
@@ -319,6 +321,8 @@ def load_configured_sources() -> list[UpstreamSource]:
                     bundle_id=bundle_id,
                     app_id=app_id,
                     country=country,
+                    initial_version=init_ver,
+                    local_version=init_ver,
                     enabled=enabled,
                 )
             )
@@ -425,6 +429,74 @@ def format_change_notification(
     return title, body
 
 
+
+def parse_version_tuple(v: str) -> tuple[int, ...]:
+    """解析语义化版本数字段，用于受控点段比较（无需外部 packaging 依赖）"""
+    clean = str(v or "").strip().lstrip("vV")
+    parts = re.split(r"[^\d]+", clean)
+    nums = [int(p) for p in parts if p.isdigit()]
+    return tuple(nums) if nums else (0,)
+
+
+def is_version_newer(latest: str, baseline: str) -> bool:
+    """比较最新版本是否高于基准版本"""
+    latest_clean = str(latest or "").strip()
+    base_clean = str(baseline or "").strip()
+    if not latest_clean or not base_clean:
+        return False
+    if latest_clean == base_clean:
+        return False
+    try:
+        t_latest = parse_version_tuple(latest_clean)
+        t_base = parse_version_tuple(base_clean)
+        max_len = max(len(t_latest), len(t_base))
+        t_latest_padded = t_latest + (0,) * (max_len - len(t_latest))
+        t_base_padded = t_base + (0,) * (max_len - len(t_base))
+        if t_latest_padded != t_base_padded:
+            return t_latest_padded > t_base_padded
+    except Exception:
+        pass
+    return latest_clean != base_clean
+
+
+def clean_release_notes(raw: Any, max_length: int = 1000) -> str:
+    """
+    清洗并规范化 App Store releaseNotes:
+    - 缺失、None 或空白明确返回'暂无更新说明'
+    - 清理 HTML 换行与标签，解码 HTML 实体
+    - 超长文本进行安全截断并附带截断标识
+    """
+    if raw is None:
+        return "暂无更新说明"
+    text = str(raw).strip()
+    if not text:
+        return "暂无更新说明"
+
+    # 处理 HTML 换行与段落
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</?p[^>]*>", "\n", text)
+    # 去除其他 HTML 标签
+    text = re.sub(r"<[^>]+>", "", text)
+    # 解码 HTML 实体
+    text = html.unescape(text)
+
+    # 规范化行并去除多余首尾空行
+    lines = [line.strip() for line in text.splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+
+    text = "\n".join(lines).strip()
+    if not text:
+        return "暂无更新说明"
+
+    if len(text) > max_length:
+        text = text[:max_length].rstrip() + "\n... (更新说明已截断)"
+
+    return text
+
+
 def check_app_store_source(
     source: UpstreamSource,
     state: dict[str, Any],
@@ -434,8 +506,9 @@ def check_app_store_source(
     """
     检查单个 App Store 应用版本更新：
     1. 查询 Apple iTunes Lookup API (bundleId 或 appId)
-    2. 首次发现建立基线版本记录
-    3. 检测到版本更新时推送 Bark 通知并去重
+    2. 首次发现：若配置了 initial_version/local_version 且最新版本高于该基线，则触发更新提醒；否则建立静默基线
+    3. 检测到版本更新时推送 Bark 通知（附 releaseNotes）并去重
+    4. 若 Bark 推送失败，保留未通知状态以便下次重试
     """
     validate_source_id(source.id)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -469,45 +542,71 @@ def check_app_store_source(
     latest_version = str(app_info.get("version", "")).strip()
     track_name = str(app_info.get("trackName", source.name)).strip()
     release_date = str(app_info.get("currentVersionReleaseDate", "")).strip()
-    release_notes = str(app_info.get("releaseNotes", "无更新日志")).strip()
+    release_notes = clean_release_notes(app_info.get("releaseNotes"))
     track_view_url = str(app_info.get("trackViewUrl", "")).strip()
 
     sources_state = state.setdefault("sources", {})
     record = sources_state.get(source.id)
+    config_baseline = str(source.initial_version or source.local_version or "").strip()
 
     if not record:
-        sources_state[source.id] = {
-            "id": source.id,
-            "type": "app_store",
-            "name": source.name,
-            "track_name": track_name,
-            "bundle_id": source.bundle_id,
-            "app_id": source.app_id,
-            "status": "BASELINE_ESTABLISHED",
-            "version": latest_version,
-            "baseline_version": latest_version,
-            "latest_version": latest_version,
-            "last_notified_version": latest_version,
-            "last_checked_at": now_iso,
-            "last_changed_at": now_iso,
-            "release_date": release_date,
-            "track_url": track_view_url,
-        }
-        msg = f"首次监控建立基线版本 (v{latest_version})"
-        print(f"[基线建立] [{source.name}] {msg}")
-        return ChangeResult(
-            source_id=source.id,
-            source_name=source.name,
-            status="BASELINE_ESTABLISHED",
-            changed=False,
-            notified=False,
-            latest_hash=latest_version,
-            reviewed_hash=latest_version,
-            message=msg,
-        )
+        # 首跑判断：若指定了本地版本且线上版本更高，则触发更新提醒而非静默基线
+        if config_baseline and is_version_newer(latest_version, config_baseline):
+            record = {
+                "id": source.id,
+                "type": "app_store",
+                "name": source.name,
+                "track_name": track_name,
+                "bundle_id": source.bundle_id,
+                "app_id": source.app_id,
+                "status": "UPDATED",
+                "version": config_baseline,
+                "baseline_version": config_baseline,
+                "latest_version": latest_version,
+                "last_notified_version": "",
+                "last_checked_at": now_iso,
+                "last_changed_at": now_iso,
+                "release_date": release_date,
+                "release_notes": release_notes,
+                "track_url": track_view_url,
+            }
+            sources_state[source.id] = record
+            prev_version = config_baseline
+        else:
+            sources_state[source.id] = {
+                "id": source.id,
+                "type": "app_store",
+                "name": source.name,
+                "track_name": track_name,
+                "bundle_id": source.bundle_id,
+                "app_id": source.app_id,
+                "status": "BASELINE_ESTABLISHED",
+                "version": latest_version,
+                "baseline_version": config_baseline or latest_version,
+                "latest_version": latest_version,
+                "last_notified_version": latest_version,
+                "last_checked_at": now_iso,
+                "last_changed_at": now_iso,
+                "release_date": release_date,
+                "release_notes": release_notes,
+                "track_url": track_view_url,
+            }
+            msg = f"首次监控建立基线版本 (v{latest_version})"
+            print(f"[基线建立] [{source.name}] {msg}")
+            return ChangeResult(
+                source_id=source.id,
+                source_name=source.name,
+                status="BASELINE_ESTABLISHED",
+                changed=False,
+                notified=False,
+                latest_hash=latest_version,
+                reviewed_hash=latest_version,
+                message=msg,
+            )
+    else:
+        record["last_checked_at"] = now_iso
+        prev_version = str(record.get("version") or "").strip()
 
-    record["last_checked_at"] = now_iso
-    prev_version = str(record.get("version") or "").strip()
     last_notified_version = str(record.get("last_notified_version") or "").strip()
 
     if prev_version and latest_version == prev_version:
@@ -553,8 +652,6 @@ def check_app_store_source(
         f"商店链接: {track_view_url}\n\n"
         f"【更新说明】\n{release_notes}\n"
     )
-    if "cloud.miplus.tft" in (source.bundle_id or "") or "yunding" in source.id.lower():
-        body += "\n【去广告提示】\n获取新版脱壳 ipa 后，运行 inject_hook.py 即可一键自动注入通用去广告 dylib。"
 
     notify_ok = False
     try:
