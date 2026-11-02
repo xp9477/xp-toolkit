@@ -9,6 +9,8 @@ payload:
   - DOMAIN-SUFFIX,totheglory.im
   - DOMAIN-SUFFIX,ourbits.club
   - DOMAIN-SUFFIX,audiences.me
+  - DOMAIN-SUFFIX,ubits.club
+  - DOMAIN-SUFFIX,hddolby.com
 # > Others
   - DOMAIN,copilot.microsoft.com
   - DOMAIN-SUFFIX,is.gd
