@@ -52,7 +52,11 @@ function ProgressBar({
 
 function TapToRefresh({ children }: { children: any }) {
   return (
-    <Button intent={ReloadQuotaIntent(undefined)} buttonStyle="plain">
+    <Button
+      intent={ReloadQuotaIntent(undefined)}
+      buttonStyle="plain"
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+    >
       {children}
     </Button>
   );
@@ -123,7 +127,11 @@ function ServiceColumn({ service }: { service: ServiceQuota }) {
   const resetText = service.resetHint ? shortenHint(service.resetHint) : service.windowLabel;
 
   return (
-    <VStack alignment="leading" spacing={4}>
+    <VStack
+      alignment="leading"
+      spacing={4}
+      frame={{ maxWidth: "infinity", alignment: "topLeading" }}
+    >
         <HStack alignment="center">
           <Text font={12} fontWeight="semibold" foregroundStyle={UI.ink}>
             {service.name}
@@ -197,17 +205,38 @@ function ServiceColumn({ service }: { service: ServiceQuota }) {
   );
 }
 
+// A vertical Divider otherwise accepts all the height proposed by the widget.
+// Keep both columns content-sized, including when a 5h window is unavailable.
+function ServiceColumns({ data }: { data: QuotaData }) {
+  return (
+    <HStack
+      spacing={12}
+      alignment="top"
+      fixedSize={{ horizontal: false, vertical: true }}
+      frame={{ maxWidth: "infinity" }}
+    >
+      <ServiceColumn service={data.chatgpt} />
+      <Divider />
+      <ServiceColumn service={data.gemini} />
+    </HStack>
+  );
+}
+
 function SmallServiceRow({ service }: { service: ServiceQuota }) {
   const resetText = service.resetHint ? shortenHint(service.resetHint) : service.windowLabel;
   return (
-    <VStack alignment="leading" spacing={2}>
-        <HStack alignment="center">
-          <Text font={11} fontWeight="semibold" foregroundStyle={UI.ink}>
+    <VStack
+      alignment="leading"
+      spacing={4}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" }}
+    >
+        <HStack alignment="firstTextBaseline">
+          <Text font={12} fontWeight="semibold" foregroundStyle={UI.ink}>
             {service.name}
           </Text>
           <Spacer />
           <Text
-            font={12}
+            font={18}
             fontWeight="bold"
             foregroundStyle={accentFor(service.remainingPct)}
             widgetAccentable
@@ -302,7 +331,7 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
             />
           )}
         </HStack>
-        <HStack spacing={8} alignment="center">
+        <HStack spacing={8} alignment="center" fixedSize={{ horizontal: false, vertical: true }}>
           <VStack alignment="center" spacing={1}>
             <Text font={8} foregroundStyle={UI.muted}>
               GPT
@@ -330,8 +359,9 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
       <TapToRefresh>
         <VStack
           alignment="leading"
-          spacing={6}
+          spacing={8}
           padding={12}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
           widgetBackground="systemBackground"
         >
           <HStack alignment="center">
@@ -360,8 +390,9 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
       <TapToRefresh>
         <VStack
           alignment="leading"
-          spacing={10}
+          spacing={12}
           padding={16}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
           widgetBackground="systemBackground"
         >
           <HStack alignment="center">
@@ -374,15 +405,11 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
             <Spacer />
           </HStack>
 
-          <HStack spacing={12} alignment="top">
-            <ServiceColumn service={data.chatgpt} />
-            <Divider />
-            <ServiceColumn service={data.gemini} />
-          </HStack>
+          <ServiceColumns data={data} />
 
           <Divider />
 
-          <VStack alignment="leading" spacing={4}>
+          <VStack alignment="leading" spacing={6}>
             <Text font={11} fontWeight="semibold" foregroundStyle={UI.muted}>
               多账号明细
             </Text>
@@ -396,6 +423,7 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
               </Text>
             )}
           </VStack>
+          <Spacer />
         </VStack>
       </TapToRefresh>
     );
@@ -406,8 +434,9 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
     <TapToRefresh>
       <VStack
         alignment="leading"
-        spacing={8}
+        spacing={10}
         padding={14}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
         widgetBackground="systemBackground"
       >
         <HStack alignment="center">
@@ -420,11 +449,12 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
           <Spacer />
         </HStack>
 
-        <HStack spacing={12} alignment="top">
-          <ServiceColumn service={data.chatgpt} />
-          <Divider />
-          <ServiceColumn service={data.gemini} />
-        </HStack>
+        <VStack
+          spacing={0}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" }}
+        >
+          <ServiceColumns data={data} />
+        </VStack>
       </VStack>
     </TapToRefresh>
   );
@@ -441,7 +471,13 @@ function refreshingPlaceholder() {
   if (!homeFamily()) return <Text font={10}>正在刷新</Text>;
   return (
     <TapToRefresh>
-      <VStack alignment="center" spacing={4} padding={14} widgetBackground="systemBackground">
+      <VStack
+        alignment="center"
+        spacing={4}
+        padding={14}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        widgetBackground="systemBackground"
+      >
         <Text font={12} fontWeight="semibold" foregroundStyle={UI.ink}>
           正在刷新
         </Text>
