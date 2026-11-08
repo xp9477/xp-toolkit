@@ -1,13 +1,13 @@
 # AI Quota (iOS Scripting)
 
-面向 iOS [Scripting](https://scripting.fun) 的原生 TypeScript / TSX 小组件工程，实时监控 **SuperGrok**、**ChatGPT Plus / Pro** 和 **Google AI Pro (Gemini)** 的剩余配额与重置时间。
+面向 iOS [Scripting](https://scripting.fun) 的原生 TypeScript / TSX 小组件工程，实时监控 **ChatGPT Plus / Pro** 和 **Google AI Pro (Gemini)** 的剩余配额与重置时间。
 
 ## 核心特性
 
 - **系统级走字相对时间**：顶部右上角集成 `<DateLabel date={...} style="relative" />`，无需后台脚本运行即可由 iOS 系统自动实时走字（如 "3分钟前"）。
 - **新鲜度指示灯**：在线最新数据标 🟢，网络异常回退本地缓存时标 🟡，状态一目了然。
 - **点击卡片刷新**：桌面小号、中号、大号整张卡片触发 `ReloadQuotaIntent`，无需进入 App。刷新时顶栏静态显示「正在刷新」，并保留上次额度；拉取完成后立刻换上新数字。锁屏小组件只展示。
-- **锁屏小组件全支持**：提供 `accessoryRectangular`（矩形三列指示）与 `accessoryInline`（单行紧凑文本），平衡展示 3 个服务，无需繁琐筛选。
+- **锁屏小组件全支持**：提供 `accessoryRectangular`（矩形双列指示）与 `accessoryInline`（单行紧凑文本），平衡展示 2 个服务，无需繁琐筛选。
 - **原生 SwiftUI 胶囊进度条与 iOS 18 染色**：采用原生平滑胶囊条，适配 iOS 18 accented 强调色与深浅色模式自适应。
 - **多账号自动合并**：支持 CPA 配置多份账号认证，主数字呈现算术平均剩余配额，大号小组件提供各子账号详细明细列表。
 
@@ -28,7 +28,6 @@ scripting/ai-quota/
 
 | 服务 | 数据来源 | 主数字 | 辅助指标 |
 |---|---|---|---|
-| **SuperGrok** | 读取 CPA 中启用的 xAI 认证，请求 `billing?format=credits` | 周额度剩余百分比 | 账单周期重置倒计时 |
 | **ChatGPT Plus/Pro** | 读取 CPA 中启用的 OpenAI/Codex 认证，请求 `backend-api/wham/usage` | 主窗口剩余百分比（通常 7 天） | 5小时短窗口剩余及重置提示 |
 | **Google AI Pro** | 读取 CPA 中启用的 Antigravity 认证，用 `antigravity/hub/2.23.0` 请求 `retrieveUserQuotaSummary`，只取 Gemini 组 | Gemini 周额度剩余 | 5小时短窗口额度 |
 
@@ -36,6 +35,8 @@ scripting/ai-quota/
 
 ### 1. 导入项目
 在 Scripting App 内新建或导入 `ai-quota` 目录项目。
+
+升级时覆盖导入即可：原有 CPA 配置与 ChatGPT / Gemini 缓存保留，不再查询或展示 Grok。
 
 ### 2. 配置 CPA 凭据（任选一种）
 - **方式一：App 内交互配置（推荐）**

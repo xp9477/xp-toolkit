@@ -276,7 +276,7 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
     if (spinning) return <Text font={10}>正在刷新</Text>;
     return (
       <Text font={10}>
-        Grok:{pctLabel(data.grok.remainingPct)}% · GPT:{pctLabel(data.chatgpt.remainingPct)}% · Gem:{pctLabel(data.gemini.remainingPct)}%
+        GPT:{pctLabel(data.chatgpt.remainingPct)}% · Gem:{pctLabel(data.gemini.remainingPct)}%
       </Text>
     );
   }
@@ -303,15 +303,6 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
           )}
         </HStack>
         <HStack spacing={8} alignment="center">
-          <VStack alignment="center" spacing={1}>
-            <Text font={8} foregroundStyle={UI.muted}>
-              Grok
-            </Text>
-            <Text font={12} fontWeight="bold" foregroundStyle={accentFor(data.grok.remainingPct)}>
-              {pctLabel(data.grok.remainingPct)}%
-            </Text>
-          </VStack>
-          <Divider />
           <VStack alignment="center" spacing={1}>
             <Text font={8} foregroundStyle={UI.muted}>
               GPT
@@ -348,8 +339,6 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
             <Spacer />
           </HStack>
 
-          <SmallServiceRow service={data.grok} />
-          <Divider />
           <SmallServiceRow service={data.chatgpt} />
           <Divider />
           <SmallServiceRow service={data.gemini} />
@@ -360,9 +349,6 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
 
   if (f === "systemLarge") {
     const allDetails: { detail: ServiceAccountDetail; serviceName: string }[] = [];
-    if (data.grok.accountDetails) {
-      data.grok.accountDetails.forEach((d) => allDetails.push({ detail: d, serviceName: "Grok" }));
-    }
     if (data.chatgpt.accountDetails) {
       data.chatgpt.accountDetails.forEach((d) => allDetails.push({ detail: d, serviceName: "ChatGPT" }));
     }
@@ -389,8 +375,6 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
           </HStack>
 
           <HStack spacing={12} alignment="top">
-            <ServiceColumn service={data.grok} />
-            <Divider />
             <ServiceColumn service={data.chatgpt} />
             <Divider />
             <ServiceColumn service={data.gemini} />
@@ -437,8 +421,6 @@ export function QuotaWidget({ data }: { data: QuotaData }) {
         </HStack>
 
         <HStack spacing={12} alignment="top">
-          <ServiceColumn service={data.grok} />
-          <Divider />
           <ServiceColumn service={data.chatgpt} />
           <Divider />
           <ServiceColumn service={data.gemini} />

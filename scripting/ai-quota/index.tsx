@@ -58,7 +58,6 @@ function ConfigApp() {
     try {
       const data = await fetchQuotaData(true);
       const lines = [
-        `• Grok: ${data.grok.remainingPct != null ? pctLabel(data.grok.remainingPct) + "%" : "未获取"} (${data.grok.resetHint || data.grok.windowLabel})`,
         `• ChatGPT: ${data.chatgpt.remainingPct != null ? pctLabel(data.chatgpt.remainingPct) + "%" : "未获取"} (${data.chatgpt.resetHint || data.chatgpt.windowLabel})`,
         `• Gemini: ${data.gemini.remainingPct != null ? pctLabel(data.gemini.remainingPct) + "%" : "未获取"} (${data.gemini.resetHint || data.gemini.windowLabel})`,
       ];

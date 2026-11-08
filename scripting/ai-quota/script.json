@@ -6,10 +6,10 @@
   },
   "icon": "chart.bar.fill",
   "color": "#3B82F6",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "runInApp": true,
-  "description": "Monitor remaining quota for SuperGrok, ChatGPT Plus, and Google AI Pro.",
+  "description": "Monitor remaining quota for ChatGPT Plus / Pro and Google AI Pro.",
   "localizedDescriptions": {
-    "zh": "实时监控 SuperGrok、ChatGPT Plus / Pro 与 Google AI Pro 剩余额度与重置时间。"
+    "zh": "实时监控 ChatGPT Plus / Pro 与 Google AI Pro 剩余额度与重置时间。"
   }
 }

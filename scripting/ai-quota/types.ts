@@ -15,7 +15,7 @@ export interface ServiceAccountDetail {
   extra?: string;
 }
 
-export type ServiceId = "grok" | "chatgpt" | "gemini";
+export type ServiceId = "chatgpt" | "gemini";
 
 export interface ServiceQuota {
   id: ServiceId;
@@ -66,7 +66,6 @@ export interface CPAApiResponse {
 
 export interface QuotaData {
   fetchedAt: string;
-  grok: ServiceQuota;
   chatgpt: ServiceQuota;
   gemini: ServiceQuota;
   errors?: string[];

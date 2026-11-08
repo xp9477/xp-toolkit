@@ -21,7 +21,6 @@ export const UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
 
 export const URLS: Record<ServiceId, string> = {
-  grok: "grok://",
   chatgpt: "com.openai.chat://",
   gemini: "googlegemini://",
 };
@@ -31,7 +30,7 @@ export const URLS: Record<ServiceId, string> = {
 export const ANTIGRAVITY_UA = "antigravity/hub/2.23.0 darwin/arm64";
 
 export function nativeAppURL(id: string): string {
-  return URLS[id as ServiceId] || URLS.grok;
+  return URLS[id as ServiceId] || URLS.chatgpt;
 }
 
 export function serviceTapURL(id: string): string {
@@ -417,36 +416,6 @@ export function authIndexOf(file: any): string | number | null {
 }
 
 // ---------- Parsers ----------
-export function parseGrokBilling(body: any): ServiceQuota {
-  const cfg = body?.config || body || {};
-  let usedPct = clampPct(Number(cfg.creditUsagePercent ?? cfg.credit_usage_percent));
-  if (usedPct == null && cfg.currentPeriod) {
-    usedPct = 0;
-  }
-  const remainingPct = usedPct == null ? null : clampPct(100 - usedPct);
-  if (remainingPct == null) {
-    throw new Error("无法解析 Grok 额度");
-  }
-  const periodEnd = cfg.currentPeriod?.end || cfg.billingPeriodEnd || cfg.billing_period_end || null;
-
-  return {
-    id: "grok",
-    name: "SuperGrok",
-    plan: "周额度",
-    remainingPct,
-    usedPct,
-    windowLabel: "本周",
-    resetHint: parseResetHint(periodEnd),
-    resetAt: parseResetTimeMs(periodEnd),
-    remaining5hPct: null,
-    reset5hHint: null,
-    reset5hAt: null,
-    extra: "",
-    url: URLS.grok,
-    ok: true,
-  };
-}
-
 export function prettyChatPlan(plan: any): string {
   const raw = String(plan || "");
   const p = raw.toLowerCase();
@@ -727,36 +696,6 @@ async function fetchAveragedAccounts(
   return result;
 }
 
-async function fetchGrokAccount(cfg: Config, xai: CPAAuth): Promise<ServiceQuota> {
-  const authIndex = authIndexOf(xai);
-  if (authIndex == null) throw new Error("CPA 未找到 Grok 认证");
-  const resp = await cpaApiCall(cfg.cpaBaseUrl, cfg.cpaApiKey, {
-    authIndex,
-    method: "GET",
-    url: "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-    header: {
-      Authorization: "Bearer $TOKEN$",
-      "x-xai-token-auth": "xai-grok-cli",
-      "x-grok-client-version": "0.2.91",
-      accept: "*/*",
-      "user-agent": "grok-pager/0.2.91 grok-shell/0.2.91 (ios; aarch64)",
-    },
-  });
-  return parseGrokBilling(parseApiBody(resp));
-}
-
-export async function fetchGrok(cfg: Config, files: CPAAuth[]): Promise<ServiceQuota> {
-  if (!cfg.cpaApiKey || !cfg.cpaBaseUrl) {
-    return emptyService("grok", "SuperGrok", URLS.grok, "未配置");
-  }
-  return fetchAveragedAccounts(
-    files,
-    [/xai/, /grok/],
-    (file) => fetchGrokAccount(cfg, file),
-    "CPA 未找到 Grok 认证"
-  );
-}
-
 async function fetchChatGPTAccount(cfg: Config, openai: CPAAuth): Promise<ServiceQuota> {
   const authIndex = authIndexOf(openai);
   if (authIndex == null) throw new Error("CPA 未找到 ChatGPT 认证");
@@ -836,7 +775,6 @@ export async function fetchAll(cfg: Config): Promise<QuotaData> {
   }
   type Job = [ServiceId, () => Promise<ServiceQuota>, string, string];
   const jobs: Job[] = [
-    ["grok", () => fetchGrok(cfg, files), "SuperGrok", URLS.grok],
     ["chatgpt", () => fetchChatGPT(cfg, files), "ChatGPT", URLS.chatgpt],
     ["gemini", () => fetchGemini(cfg, files), "Gemini", URLS.gemini],
   ];
@@ -861,7 +799,6 @@ export async function fetchAll(cfg: Config): Promise<QuotaData> {
 
   return {
     fetchedAt: new Date().toISOString(),
-    grok: services.grok,
     chatgpt: services.chatgpt,
     gemini: services.gemini,
     errors,
@@ -886,7 +823,16 @@ function loadScopedCache(scope: string): CachePayload | null {
     if (!raw) return null;
     const payload: CachePayload = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!payload || payload.scope !== scope || !payload.data?.fetchedAt) return null;
-    return payload;
+    // Keep existing account snapshots, but discard the retired provider and its warnings.
+    return {
+      ...payload,
+      data: {
+        fetchedAt: payload.data.fetchedAt,
+        chatgpt: payload.data.chatgpt,
+        gemini: payload.data.gemini,
+        errors: payload.data.errors?.filter((error) => !/^(?:Super)?Grok:/i.test(error)),
+      },
+    };
   } catch (_) {
     return null;
   }
@@ -906,7 +852,6 @@ export async function fetchQuotaData(forceRefresh = false): Promise<QuotaData> {
   if (!hasAnyAuth(cfg)) {
     return {
       fetchedAt: new Date().toISOString(),
-      grok: emptyService("grok", "SuperGrok", URLS.grok, cfg.configError || "未配置"),
       chatgpt: emptyService("chatgpt", "ChatGPT", URLS.chatgpt, cfg.configError || "未配置"),
       gemini: emptyService("gemini", "Gemini", URLS.gemini, cfg.configError || "未配置"),
       errors: [cfg.configError || "尚未配置 CPA 地址与 API Key"],
@@ -928,11 +873,10 @@ export async function fetchQuotaData(forceRefresh = false): Promise<QuotaData> {
   try {
     const data = await fetchAll(cfg);
     if (cached?.data && !forceRefresh) {
-      data.grok = mergeCachedService(data as any, cached.data as any, "grok");
       data.chatgpt = mergeCachedService(data as any, cached.data as any, "chatgpt");
       data.gemini = mergeCachedService(data as any, cached.data as any, "gemini");
     }
-    if (data.grok?.ok || data.chatgpt?.ok || data.gemini?.ok) {
+    if (data.chatgpt?.ok || data.gemini?.ok) {
       if (storage?.set) {
         try {
           storage.set(CACHE_KEY, {

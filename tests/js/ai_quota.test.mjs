@@ -70,43 +70,6 @@ test("ChatGPT parser chooses the longest active window", () => {
   assert.match(parsed.extra, /5小时剩 90%/);
 });
 
-test("Grok parser handles missing creditUsagePercent when currentPeriod exists", () => {
-  const parsed = api.parseGrokBilling({
-    config: {
-      currentPeriod: {
-        type: "USAGE_PERIOD_TYPE_WEEKLY",
-        start: "2026-09-16T03:51:39.117402+00:00",
-        end: "2026-09-23T03:51:39.117402+00:00",
-      },
-    },
-  });
-  assert.equal(parsed.remainingPct, 100);
-  assert.equal(parsed.usedPct, 0);
-  assert.equal(parsed.windowLabel, "本周");
-  assert.ok(parsed.ok);
-});
-
-test("Grok parser uses explicit creditUsagePercent when present", () => {
-  const parsed = api.parseGrokBilling({
-    config: {
-      creditUsagePercent: 25,
-      currentPeriod: {
-        type: "USAGE_PERIOD_TYPE_WEEKLY",
-        end: "2026-09-23T03:51:39.117402+00:00",
-      },
-    },
-  });
-  assert.equal(parsed.remainingPct, 75);
-  assert.equal(parsed.usedPct, 25);
-});
-
-test("Grok parser rejects responses without quota data or billing period", () => {
-  assert.throws(
-    () => api.parseGrokBilling({ config: {} }),
-    /无法解析 Grok 额度/
-  );
-});
-
 test("Google parser rejects responses without quota buckets", () => {
   assert.throws(
     () => api.parseAntigravity({ groups: [] }),
@@ -206,7 +169,6 @@ test("cached quota can be shown without a network fetch, even after the TTL", ()
       savedAt: fetchedAt,
       data: {
         fetchedAt,
-        grok: { remainingPct: 40 },
         chatgpt: { remainingPct: 50 },
         gemini: { remainingPct: 60 },
       },
@@ -215,7 +177,8 @@ test("cached quota can be shown without a network fetch, even after the TTL", ()
   const cached = api.readCachedQuota();
   assert.equal(cached.isCached, true);
   assert.equal(cached.fetchedAt, fetchedAt);
-  assert.equal(cached.grok.remainingPct, 40);
+  assert.equal(cached.chatgpt.remainingPct, 50);
+  assert.equal(cached.gemini.remainingPct, 60);
 
   installHost({
     [api.KEY.cpaBase]: cfg.cpaBaseUrl,
@@ -223,16 +186,16 @@ test("cached quota can be shown without a network fetch, even after the TTL", ()
     [api.CACHE_KEY]: {
       scope: "other",
       savedAt: fetchedAt,
-      data: { fetchedAt, grok: {}, chatgpt: {}, gemini: {} },
+      data: { fetchedAt, chatgpt: {}, gemini: {} },
     },
   });
   assert.equal(api.readCachedQuota(), null);
 });
 
 test("service tap URLs directly target native app schemes", () => {
-  assert.equal(api.serviceTapURL("grok"), "grok://");
   assert.equal(api.serviceTapURL("chatgpt"), "com.openai.chat://");
   assert.equal(api.serviceTapURL("gemini"), "googlegemini://");
+  assert.equal(api.serviceTapURL("unknown"), "com.openai.chat://");
 });
 
 test("reset hint chooses the earliest/fastest refreshing account", () => {
@@ -327,4 +290,88 @@ test("Google parser rejects a Claude-only summary instead of showing 100%", () =
     }),
     /没有 Gemini 额度/
   );
+});
+
+test("unconfigured quota contains only ChatGPT and Gemini", async () => {
+  installHost();
+  const data = await api.fetchQuotaData();
+  assert.equal(data.chatgpt.ok, false);
+  assert.equal(data.gemini.ok, false);
+  assert.equal("grok" in data, false);
+  assert.deepEqual(Object.keys(api.URLS), ["chatgpt", "gemini"]);
+});
+
+test("legacy cache retains supported quotas without Grok or its warnings", async (t) => {
+  const cfg = { cpaBaseUrl: "https://cpa.example", cpaApiKey: "secret" };
+  const fetchedAt = new Date().toISOString();
+  const legacyData = {
+    fetchedAt,
+    grok: { remainingPct: 40 },
+    chatgpt: { remainingPct: 50, ok: true },
+    gemini: { remainingPct: 60, ok: true },
+    errors: ["SuperGrok: CPA 未找到 Grok 认证", "Grok: 登录已过期", "Gemini: 登录已过期"],
+  };
+  const box = installHost({
+    [api.KEY.cpaBase]: cfg.cpaBaseUrl,
+    [api.KEY.cpaKey]: cfg.cpaApiKey,
+    [api.CACHE_KEY]: { scope: api.cacheScope(cfg), savedAt: fetchedAt, data: legacyData },
+  });
+  t.mock.method(globalThis, "fetch", () => {
+    assert.fail("reading a fresh cache must not fetch the network");
+  });
+  for (const data of [api.readCachedQuota(), await api.fetchQuotaData()]) {
+    assert.equal(data.isCached, true);
+    assert.equal(data.chatgpt.remainingPct, 50);
+    assert.equal(data.gemini.remainingPct, 60);
+    assert.equal("grok" in data, false);
+    assert.deepEqual(data.errors, ["Gemini: 登录已过期"]);
+  }
+  box[api.CACHE_KEY] = JSON.stringify({ scope: api.cacheScope(cfg), savedAt: fetchedAt, data: legacyData });
+  assert.equal("grok" in api.readCachedQuota(), false);
+});
+
+test("forced refresh requests and caches only ChatGPT and Gemini even with xAI auth", async (t) => {
+  const cfg = { cpaBaseUrl: "https://cpa.example", cpaApiKey: "secret" };
+  const box = installHost({ [api.KEY.cpaBase]: cfg.cpaBaseUrl, [api.KEY.cpaKey]: cfg.cpaApiKey });
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (url.endsWith("/auth-files")) {
+      return Response.json({ files: [
+        { provider: "xai", name: "grok.json", auth_index: 9 },
+        { provider: "codex", name: "chatgpt.json", auth_index: 1 },
+        { provider: "antigravity", name: "gemini.json", auth_index: 2 },
+      ] });
+    }
+    assert.equal(url, `${cfg.cpaBaseUrl}/v0/management/api-call`);
+    const request = JSON.parse(options.body);
+    calls.push(request);
+    const responses = {
+      "https://chatgpt.com/backend-api/wham/usage": {
+        plan_type: "plus",
+        rate_limit: { primary_window: { used_percent: 30, limit_window_seconds: 604800 } },
+      },
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary": {
+        groups: [{ displayName: "Gemini Models", buckets: [
+          { bucketId: "gemini-weekly", window: "weekly", remainingFraction: 0.6 },
+        ] }],
+      },
+    };
+    assert.ok(Object.hasOwn(responses, request.url), `unexpected provider request: ${request.url}`);
+    return Response.json({ status_code: 200, body: responses[request.url] });
+  });
+  const data = await api.fetchQuotaData(true);
+  assert.equal(data.chatgpt.remainingPct, 70);
+  assert.equal(data.gemini.remainingPct, 60);
+  assert.deepEqual(data.errors, []);
+  assert.deepEqual(calls.map((call) => call.auth_index).sort(), ["1", "2"]);
+  assert.equal("grok" in data, false);
+  assert.equal("grok" in box[api.CACHE_KEY].data, false);
+});
+
+test("missing supported credentials never adds a Grok warning", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => Response.json({ files: [] }));
+  const data = await api.fetchAll({ cpaBaseUrl: "https://cpa.example", cpaApiKey: "secret" });
+  assert.equal(data.errors.length, 2);
+  assert.ok(data.errors.every((error) => /^(ChatGPT|Gemini):/.test(error)));
+  assert.equal("grok" in data, false);
 });
