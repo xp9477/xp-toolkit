@@ -12,7 +12,8 @@
 | `skills/` | 自建 Codex / Agent Skills |
 | `codex-plugin/` | Codex 个人插件市场；Site Research 首先支持 Linux.do 只读账号检索 |
 | `raycast/` | 预留：Raycast 插件 |
-| `scripting/` | iOS Scripting 组件与脚本（AI 套餐用量） |
+| [`scriptable/`](./scriptable/) | iOS Scriptable 版 AI 余量小组件（推荐） |
+| `scripting/` | 原 iOS Scripting 版 AI 余量小组件 |
 | `userscripts/` | 浏览器油猴脚本 |
 | `.github/` | 质量门禁、依赖更新与规则跨端同步 CI |
 

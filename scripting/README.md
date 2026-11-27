@@ -2,6 +2,8 @@
 
 iOS [Scripting](https://scripting.fun) 原生 TypeScript / TSX 项目集合。
 
+AI 余量已有独立的 [Scriptable 版](../scriptable/)，本目录保留原版。
+
 相比传统的 Scriptable，Scripting 支持真正的现代开发工作流：
 - 原生 TypeScript / TSX 与 JSX 声明式界面开发
 - 基于 SwiftUI 理念的原生视图体系（VStack, HStack, Capsule, Button, Link, DateLabel 等）

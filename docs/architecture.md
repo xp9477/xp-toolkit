@@ -13,7 +13,7 @@ flowchart TB
     QL[青龙任务]
     UL[Loon 规则源]
     US[Userscripts]
-    SC[Scripting]
+    SC[Scripting / Scriptable]
     SK[Agent Skill]
   end
 
@@ -23,7 +23,7 @@ flowchart TB
 
   QL --> QLR[青龙 / Python]
   US --> BR[浏览器 / Tampermonkey]
-  SC --> IOS[iOS / Scripting]
+  SC --> IOS[iOS / Scripting 与 Scriptable]
   SK --> AG[Codex / mitmproxy 工具环境]
   CL --> PC[代理客户端]
   LO --> PC
@@ -37,7 +37,7 @@ flowchart TB
 
 ### 1. 按交付物划分，而不是按语言划分
 
-顶层目录是部署边界：`qinglong/`、`proxy/`、`scripting/`、`userscripts/`、`skills/`、`codex-plugin/` 和未来的
+顶层目录是部署边界：`qinglong/`、`proxy/`、`scripting/`、`scriptable/`、`userscripts/`、`skills/`、`codex-plugin/` 和未来的
 `raycast/`。一个目录内可以共享代码；跨目录默认只能共享文档、测试约定和生成协议。
 
 这样做避免一个独立 userscript 因为“复用”仓库模块而变得无法单文件安装，也避免青龙环境被迫安装
@@ -136,10 +136,13 @@ Loon 文件是 canonical source。同步器采用临时文件、`fsync` 和原�
 - 会话和令牌只写 userscript 管理器存储，不降级到页面 `localStorage`。
 - `@match`、`@connect` 和跨域请求权限保持最小化，并在无法静态收窄时记录残余风险。
 
-### Scripting
+### Scripting / Scriptable
 
 Scripting 文件同样是独立交付物。凭据放 Keychain，缓存键必须包含非明文的账号/端点作用域，避免切换账号后
 复用旧数据。多个互不依赖的数据源并行请求；单源失败应被隔离并在 UI 中明确显示，不能伪装成零用量。
+
+Scriptable 版的单文件部署产物 `scriptable/AI-Quota.js` 在构建时复用 Scripting 版的 CPA 数据逻辑，
+两者不共享运行时、凭据或缓存。构建检查防止产物与两边的源文件不一致。
 
 ### Skills
 
@@ -153,7 +156,7 @@ unsafe opt-in。
 
 1. Python lint、格式和语法检查。
 2. Python 单元测试。
-3. Scripting、userscript 与 Loon JavaScript / TypeScript 语法检查。
+3. Scriptable、userscript 与 Loon JavaScript 语法检查；校验 Scriptable 单文件产物。
 4. JavaScript 单元测试。
 5. 青龙直接依赖漏洞审计。
 
